@@ -14,10 +14,9 @@ build/
 *.out
 *.ncu-rep
 
-# Results (可能很大)
-results/*.csv
-results/*.ncu-rep
-plots/*.png
+# Data & Results
+data/
+results/
 
 # IDE
 .vscode/
