@@ -1,19 +1,18 @@
 """
-Triton MLP 模型
+CUDA MLP 模型
 
-使用 Triton kernel（TritonLinear + TritonActivation）构建 MLP，
-接口与 PyTorch MLP（model.py）完全对称，可直接传入现有 Trainer。
+使用 CUDA kernel（CUDALinear + CUDAActivation）构建 MLP，
+接口与 PyTorch MLP（model.py）和 Triton MLP（triton_model.py）完全对称。
 """
 
 from python.mnist.model import MLPConfig
-from python.mnist.triton_layers import TritonLinear, TritonActivation, TritonLayerNorm
+from python.mnist.cuda_layers import CUDALinear, CUDAActivation, CUDALayerNorm
 
-import torch
 import torch.nn as nn
 
 
-class TritonMLP(nn.Module):
-    """使用 Triton kernel 的可配置多层 MLP。结构与 model.py:MLP 对称。"""
+class CUDAMLP(nn.Module):
+    """使用 CUDA kernel 的可配置多层 MLP。结构与 model.py:MLP 对称。"""
 
     def __init__(self, config: MLPConfig):
         super().__init__()
@@ -25,14 +24,14 @@ class TritonMLP(nn.Module):
 
         dims = config.hidden_dims
         for i in range(len(dims) - 1):
-            self.layers.append(TritonLinear(dims[i], dims[i + 1]))
+            self.layers.append(CUDALinear(dims[i], dims[i + 1]))
             is_last = (i == len(dims) - 2)
             if not is_last:
                 if config.use_layernorm:
-                    self.norms.append(TritonLayerNorm(dims[i + 1]))
+                    self.norms.append(CUDALayerNorm(dims[i + 1]))
                 else:
                     self.norms.append(nn.Identity())
-                self.activations.append(TritonActivation(config.activation))
+                self.activations.append(CUDAActivation(config.activation))
                 self.use_activation.append(True)
             else:
                 self.norms.append(nn.Identity())
@@ -41,7 +40,7 @@ class TritonMLP(nn.Module):
 
         self.dropout = nn.Dropout(config.dropout) if config.dropout > 0 else nn.Identity()
 
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
+    def forward(self, x):
         if x.dim() == 4:
             x = x.flatten(1)
         elif x.dim() == 2 and x.shape[1] != self.config.hidden_dims[0]:

@@ -15,10 +15,8 @@ setup(
                 'nvcc': [
                     '-O3',
                     '--use_fast_math',
-                    # '-arch=sm_80',  # A100
-                    # '-arch=sm_86',  # RTX 3090
-                    # '-arch=sm_89',  # RTX 4090
-                    # '-arch=sm_75',  # T4
+                    '-gencode=arch=compute_86,code=sm_86',
+                    '-gencode=arch=compute_120,code=sm_120',
                 ],
             },
         ),

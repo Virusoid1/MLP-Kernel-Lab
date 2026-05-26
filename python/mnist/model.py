@@ -18,12 +18,14 @@ class MLPConfig:
     hidden_dims: list[int] = field(default_factory=lambda: [784, 256, 128, 10])
     activation: str = "gelu"  # relu | gelu | silu
     dropout: float = 0.0
+    use_layernorm: bool = False
 
     def to_dict(self) -> dict:
         return {
             "hidden_dims": list(self.hidden_dims),
             "activation": self.activation,
             "dropout": self.dropout,
+            "use_layernorm": self.use_layernorm,
         }
 
     @classmethod
@@ -32,6 +34,7 @@ class MLPConfig:
             hidden_dims=list(d.get("hidden_dims", [784, 256, 128, 10])),
             activation=d.get("activation", "gelu"),
             dropout=d.get("dropout", 0.0),
+            use_layernorm=d.get("use_layernorm", False),
         )
 
 
@@ -50,6 +53,7 @@ class MLP(nn.Module):
         self.config = config
         self.layers = nn.ModuleList()
         self.activations = nn.ModuleList()
+        self.norms = nn.ModuleList()
         self.use_activation = []  # 标记哪些层需要激活
 
         dims = config.hidden_dims
@@ -57,9 +61,14 @@ class MLP(nn.Module):
             self.layers.append(nn.Linear(dims[i], dims[i + 1]))
             is_last_hidden = (i == len(dims) - 2)
             if not is_last_hidden:
+                if config.use_layernorm:
+                    self.norms.append(nn.LayerNorm(dims[i + 1]))
+                else:
+                    self.norms.append(nn.Identity())
                 self.activations.append(_ACTIVATIONS[config.activation]())
                 self.use_activation.append(True)
             else:
+                self.norms.append(nn.Identity())
                 self.activations.append(nn.Identity())
                 self.use_activation.append(False)
 
@@ -77,6 +86,7 @@ class MLP(nn.Module):
 
         for i, linear in enumerate(self.layers):
             x = linear(x)
+            x = self.norms[i](x)
             x = self.activations[i](x)
             if self.use_activation[i] and self.dropout is not None:
                 x = self.dropout(x)
