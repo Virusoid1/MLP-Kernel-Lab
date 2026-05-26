@@ -148,7 +148,11 @@ def benchmark_inference(
     # warmup
     with torch.inference_mode():
         for _ in range(warmup_batches):
-            x, _ = next(data_iter)
+            try:
+                x, _ = next(data_iter)
+            except StopIteration:
+                data_iter = iter(loader)
+                x, _ = next(data_iter)
             x = x.cuda()
             _ = model(x)
 
@@ -157,7 +161,11 @@ def benchmark_inference(
 
     with torch.inference_mode():
         for _ in range(measure_batches):
-            x, _ = next(data_iter)
+            try:
+                x, _ = next(data_iter)
+            except StopIteration:
+                data_iter = iter(loader)
+                x, _ = next(data_iter)
             x = x.cuda()
 
             start = torch.cuda.Event(enable_timing=True)
