@@ -38,6 +38,13 @@ except ImportError:
     CUDAMLP = None
     _HAS_CUDA = False
 
+try:
+    from python.mnist.cutile_model import CUTILEMLP
+    _HAS_CUTILE = True
+except ImportError:
+    CUTILEMLP = None
+    _HAS_CUTILE = False
+
 
 def set_seed(seed: int):
     random.seed(seed)
@@ -59,6 +66,7 @@ def parse_args():
     parser.add_argument("--seed", type=int, default=None)
     parser.add_argument("--no-bench", action="store_true")
     parser.add_argument("--cuda", action="store_true", help="Also compare CUDA MLP (3-way)")
+    parser.add_argument("--cutile", action="store_true", help="Also compare cuTile MLP (4-way)")
     parser.add_argument("--precision", type=str, default="tf32", choices=["tf32", "fp32"],
                         help="Precision mode: tf32 (tensor cores) or fp32 (strict)")
     return parser.parse_args()
@@ -121,49 +129,20 @@ def print_comparison(
     epochs: int,
     cu_history: list | None = None, cu_time: float | None = None,
     cu_params: int = 0, cu_bench: dict | None = None,
+    ct_history: list | None = None, ct_time: float | None = None,
+    ct_params: int = 0, ct_bench: dict | None = None,
 ):
     has_cuda = cu_history is not None
-    label = "PyTorch vs Triton" + (" vs CUDA" if has_cuda else "")
-    print(f"\n{'='*90}")
-    print(f"  Comparison: {label}")
-    print(f"{'='*90}")
-
-    # 每 epoch 对比
+    has_cutile = ct_history is not None
+    backends = ["PyTorch", "Triton"]
     if has_cuda:
-        header = (
-            f"  {'Epoch':>5}  | "
-            f"{'PyTorch Acc':>11} {'PyTorch Loss':>12}  | "
-            f"{'Triton Acc':>10} {'Triton Loss':>11}  | "
-            f"{'CUDA Acc':>8} {'CUDA Loss':>10}"
-        )
-        print(header)
-        print("  " + "-" * (len(header) - 2))
-
-        for p, t, c in zip(pytorch_history, triton_history, cu_history):
-            print(
-                f"  {p['epoch']:5d}  | "
-                f"{p['val_acc']:11.2%} {p['val_loss']:12.6f}  | "
-                f"{t['val_acc']:10.2%} {t['val_loss']:11.6f}  | "
-                f"{c['val_acc']:8.2%} {c['val_loss']:10.6f}"
-            )
-    else:
-        header = (
-            f"  {'Epoch':>5}  | "
-            f"{'PyTorch Acc':>11} {'PyTorch Loss':>12}  | "
-            f"{'Triton Acc':>10} {'Triton Loss':>11}  | "
-            f"{'Acc Diff':>8}"
-        )
-        print(header)
-        print("  " + "-" * (len(header) - 2))
-
-        for p, t in zip(pytorch_history, triton_history):
-            acc_diff = t["val_acc"] - p["val_acc"]
-            print(
-                f"  {p['epoch']:5d}  | "
-                f"{p['val_acc']:11.2%} {p['val_loss']:12.6f}  | "
-                f"{t['val_acc']:10.2%} {t['val_loss']:11.6f}  | "
-                f"{acc_diff:+8.2%}"
-            )
+        backends.append("CUDA")
+    if has_cutile:
+        backends.append("cuTile")
+    label = " vs ".join(backends)
+    print(f"\n{'='*100}")
+    print(f"  Comparison: {label}")
+    print(f"{'='*100}")
 
     # 最终准确率
     p_best = max(pytorch_history, key=lambda m: m["val_acc"])
@@ -174,6 +153,9 @@ def print_comparison(
     if has_cuda:
         c_best = max(cu_history, key=lambda m: m["val_acc"])
         print(f"  CUDA    best val_acc: {c_best['val_acc']:.2%} (epoch {c_best['epoch']})")
+    if has_cutile:
+        ct_best = max(ct_history, key=lambda m: m["val_acc"])
+        print(f"  cuTile  best val_acc: {ct_best['val_acc']:.2%} (epoch {ct_best['epoch']})")
 
     # 训练时间
     print(f"\n  Training time:")
@@ -181,12 +163,14 @@ def print_comparison(
     print(f"    Triton:  {triton_time:.1f}s")
     if has_cuda:
         print(f"    CUDA:    {cu_time:.1f}s")
+    if has_cutile:
+        print(f"    cuTile:  {ct_time:.1f}s")
 
     # 基准测试对比
     if pytorch_bench and triton_bench:
-        print(f"\n{'='*90}")
+        print(f"\n{'='*100}")
         print("  Benchmark Comparison")
-        print(f"{'='*90}")
+        print(f"{'='*100}")
 
         pt = pytorch_bench["training"]
         tt = triton_bench["training"]
@@ -194,12 +178,17 @@ def print_comparison(
         print(f"    PyTorch: {pt['step_time_ms_median']:.3f}ms (median) / {pt['step_time_ms_p95']:.3f}ms (p95)")
         print(f"    Triton:  {tt['step_time_ms_median']:.3f}ms (median) / {tt['step_time_ms_p95']:.3f}ms (p95)")
         if cu_bench:
-            ct = cu_bench["training"]
-            print(f"    CUDA:    {ct['step_time_ms_median']:.3f}ms (median) / {ct['step_time_ms_p95']:.3f}ms (p95)")
+            cub = cu_bench["training"]
+            print(f"    CUDA:    {cub['step_time_ms_median']:.3f}ms (median) / {cub['step_time_ms_p95']:.3f}ms (p95)")
+        if ct_bench:
+            ctb = ct_bench["training"]
+            print(f"    cuTile:  {ctb['step_time_ms_median']:.3f}ms (median) / {ctb['step_time_ms_p95']:.3f}ms (p95)")
         print(f"    PyTorch throughput: {pt['samples_per_sec']:,.0f} samples/sec")
         print(f"    Triton  throughput: {tt['samples_per_sec']:,.0f} samples/sec")
         if cu_bench:
-            print(f"    CUDA    throughput: {ct['samples_per_sec']:,.0f} samples/sec")
+            print(f"    CUDA    throughput: {cub['samples_per_sec']:,.0f} samples/sec")
+        if ct_bench:
+            print(f"    cuTile  throughput: {ctb['samples_per_sec']:,.0f} samples/sec")
 
         pi = pytorch_bench["inference"]
         ti = triton_bench["inference"]
@@ -209,10 +198,15 @@ def print_comparison(
         if cu_bench:
             ci = cu_bench["inference"]
             print(f"    CUDA:    {ci['latency_ms_per_batch_median']:.3f}ms/batch (median)")
+        if ct_bench:
+            cti = ct_bench["inference"]
+            print(f"    cuTile:  {cti['latency_ms_per_batch_median']:.3f}ms/batch (median)")
         print(f"    PyTorch throughput: {pi['samples_per_sec']:,.0f} samples/sec")
         print(f"    Triton  throughput: {ti['samples_per_sec']:,.0f} samples/sec")
         if cu_bench:
             print(f"    CUDA    throughput: {ci['samples_per_sec']:,.0f} samples/sec")
+        if ct_bench:
+            print(f"    cuTile  throughput: {cti['samples_per_sec']:,.0f} samples/sec")
 
 
 def main():
@@ -274,10 +268,22 @@ def main():
                 CUDAMLP, "CUDA MLP", config, train_loader, test_loader, device
             )
 
+    # 训练 cuTile MLP (可选)
+    ct_history, ct_time, ct_model, ct_trainer = None, None, None, None
+    if args.cutile:
+        if not _HAS_CUTILE:
+            print("WARNING: cuTile MLP 不可用（cuda.tile 模块未安装），跳过 cuTile 对比。")
+        else:
+            set_seed(config.get("seed", 42))
+            ct_history, ct_time, ct_model, ct_trainer = train_model(
+                CUTILEMLP, "cuTile MLP", config, train_loader, test_loader, device
+            )
+
     # 基准测试
     pt_bench = None
     tr_bench = None
     cu_bench = None
+    ct_bench = None
     if not args.no_bench:
         print(f"\n{'='*60}")
         print("  Running benchmarks...")
@@ -320,6 +326,19 @@ def main():
             )
             cu_bench = {"training": cu_bench_tr, "inference": cu_bench_inf}
 
+        if ct_model is not None:
+            ct_bench_tr = benchmark_training(
+                ct_model, train_loader, ct_trainer.criterion, ct_trainer.optimizer,
+                warmup_steps=config["benchmark"]["warmup_steps"],
+                measure_steps=config["benchmark"]["measure_steps"],
+            )
+            ct_bench_inf = benchmark_inference(
+                ct_model, test_loader,
+                warmup_batches=config["benchmark"]["inference_warmup"],
+                measure_batches=config["benchmark"]["inference_measure"],
+            )
+            ct_bench = {"training": ct_bench_tr, "inference": ct_bench_inf}
+
     # 输出对比
     print_comparison(
         pt_history, pt_time, pt_model.get_num_parameters(),
@@ -329,6 +348,9 @@ def main():
         cu_history=cu_history, cu_time=cu_time,
         cu_params=cu_model.get_num_parameters() if cu_model else 0,
         cu_bench=cu_bench,
+        ct_history=ct_history, ct_time=ct_time,
+        ct_params=ct_model.get_num_parameters() if ct_model else 0,
+        ct_bench=ct_bench,
     )
 
     # 导出 JSON
@@ -365,6 +387,16 @@ def main():
             "best_val_acc": cu_best.get("val_acc", 0),
             "training_time_s": cu_time,
             "total_params": cu_model.get_num_parameters() if cu_model else 0,
+        }
+
+    if ct_history is not None:
+        ct_best = max(ct_history, key=lambda m: m["val_acc"]) if ct_history else {}
+        result["cutile"] = {
+            "training_history": ct_history,
+            "benchmark": ct_bench,
+            "best_val_acc": ct_best.get("val_acc", 0),
+            "training_time_s": ct_time,
+            "total_params": ct_model.get_num_parameters() if ct_model else 0,
         }
 
     out_path = Path(results_dir) / f"compare_{ts}.json"

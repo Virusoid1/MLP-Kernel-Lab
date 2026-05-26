@@ -1,5 +1,25 @@
 # CHANGELOG
 
+## 2026-05-27 #1 — cuTile Python 算子实现 + 四后端对比
+
+**内容：**
+- 新建 `cutile_kernels/` 模块：NVIDIA cuTile Python tile-based GPU 编程
+  - `matmul.py`：分块矩阵乘法（ct.mma 融合乘加）
+  - `elementwise.py`：BiasAdd、ReLU、GELU（tanh 近似）、SiLU、融合 BiasAdd+ReLU
+  - `backward.py`：MatMul backward（dA=dC@B^T, dB=A^T@dC）、ReLU/GELU/SiLU backward
+  - `layernorm.py`：LayerNorm forward/backward（ct.sum reduction + ct.atomic_add scatter）
+  - `mlp_cutile.py`：融合 matmul+bias+GELU
+  - `swiglu_cutile.py`：融合 SwiGLU
+- 新建 `python/mnist/cutile_layers.py`：CUTILELinear/CUTILEActivation/CUTILELayerNorm autograd 层
+- 新建 `python/mnist/cutile_model.py`：CUTILEMLP 模型（与 PyTorch/Triton/CUDA MLP 结构对称）
+- 新建 `tests/test_cutile_kernels.py`：18 项 cuTile kernel 正确性测试
+- `run_compare.py`：添加 `--cutile` 参数，支持 PyTorch/Triton/CUDA/cuTile 四后端对比
+
+**验证：**
+- 18 项 cuTile 测试全部通过
+- 全部 55 项 Python 测试通过（Triton 21 + CUDA 16 + cuTile 18）
+- cuTile MLP 前向/反向传播正常，梯度无 NaN/Inf
+
 ## 2026-05-26 #4 — LayerNorm 实现 + 测试完善
 
 **内容：**
