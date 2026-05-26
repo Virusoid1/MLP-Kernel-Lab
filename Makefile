@@ -1,4 +1,18 @@
-.PHONY: install test bench profile clean plots
+.PHONY: install test bench profile clean plots test-cuda test-python
+
+# Python 测试
+test-python:
+	python -m pytest tests/ -v
+
+# C++ CUDA 测试
+test-cuda: build/test_kernels
+	@echo "Running CUDA C++ tests..."
+	./build/test_kernels
+
+build/test_kernels: tests/test_kernels.cu
+	@mkdir -p build
+	nvcc -O3 -o $@ $< --use_fast_math \
+		-gencode=arch=compute_86,code=sm_86
 
 # 安装 CUDA extension
 install:
@@ -32,13 +46,22 @@ bench-quick:
 
 # profiling (需要 Nsight Compute)
 profile-naive:
-	ncu --set full -o results/ncu_naive python bench/benchmark.py --impl cuda_naive --M 512 --K 768 --N 3072
+	bash profiling/run_ncu.sh naive
 
 profile-tiled:
-	ncu --set full -o results/ncu_tiled python bench/benchmark.py --impl cuda_tiled --M 512 --K 768 --N 3072
+	bash profiling/run_ncu.sh tiled
 
 profile-roofline:
-	ncu --set roofline -o results/ncu_roofline python bench/benchmark.py --impl cuda_tiled --M 512 --K 768 --N 3072
+	bash profiling/run_ncu.sh roofline
+
+profile-triton:
+	bash profiling/run_ncu.sh triton
+
+profile-triton-matmul:
+	bash profiling/run_ncu.sh triton-matmul
+
+profile-compare:
+	bash profiling/run_ncu.sh compare
 
 # 生成图表
 plots:
