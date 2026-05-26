@@ -1,12 +1,13 @@
 # MNIST MLP Training Configuration
 model:
-  hidden_dims: [784, 256, 128, 10]
-  activation: gelu   # relu | gelu | silu
-  dropout: 0.0
+  hidden_dims: [784, 1024, 512, 256, 10]
+  activation: relu
+  dropout: 0.1
+  use_layernorm: true
 
 training:
-  batch_size: 128
-  epochs: 20
+  batch_size: 256
+  epochs: 15
   learning_rate: 0.001
   weight_decay: 0.0001
 
