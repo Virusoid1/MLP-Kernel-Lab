@@ -9,6 +9,7 @@ C = A @ B，A: (M, K), B: (K, N), C: (M, N)
 import cuda.tile as ct
 import torch
 from math import ceil
+from triton_kernels.gpu_utils import get_arch_params
 
 
 @ct.kernel
@@ -36,7 +37,7 @@ def cutile_matmul(a: torch.Tensor, b: torch.Tensor) -> torch.Tensor:
     M, K = a.shape
     _, N = b.shape
 
-    TM, TN, TK = 32, 32, 32
+    TM, TN, TK = get_arch_params()["cutile_matmul_tile"]
     c = torch.empty((M, N), device=a.device, dtype=torch.float32)
 
     grid = (ceil(M / TM), ceil(N / TN), 1)

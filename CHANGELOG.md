@@ -1,5 +1,27 @@
 # CHANGELOG
 
+## 2026-05-27 #2 — RTX 5070 Ti (Blackwell SM 12.0) 优化
+
+**内容：**
+- `triton_kernels/gpu_utils.py`：新增 `get_arch_params()` 函数，按 GPU 架构返回推荐 tile/warp/stage 参数
+- Triton autotune 配置扩展：
+  - `matmul.py`：追加 Blackwell 专属配置（128x128x128, 256x64x32 等）
+  - `backward.py`：追加大 tile matmul backward 配置 + 8192 BLOCK_SIZE activation backward
+  - `mlp_triton.py`：追加 Blackwell fused MLP 配置（128x128x128, 256x64x32）
+- `triton_kernels/elementwise.py`：ReLU/GELU/SiLU kernel 添加 `@triton.autotune`（原硬编码 1024）
+- `triton_kernels/swiglu_triton.py`：SwiGLU kernel 添加 `@triton.autotune`
+- CUDA kernel 扩展：
+  - 新增 WMMA64 变体（`matmul_wmma64_kernel`/`transB`/`transA`），64x64 tile，256 threads
+  - 新增 tiled 模板实例化（64x64x32, 64x64x64, 128x64x32）
+  - `launch_matmul_tiled_auto` 扩展为 5 级 dispatch（1024→WMMA64, 512→WMMA32, 256→64x64, 128→32x32, fallback→16x16）
+  - fused MLP dispatch 扩展为 3 级（512→64x64, 128→32x32, fallback→16x16）
+- cuTile 架构感知 tile 参数：所有 host 函数从 `get_arch_params()` 读取 tile 大小
+- `CMakeLists.txt`：`CMAKE_CUDA_ARCHITECTURES` 从 `80` 改为 `86;120`
+
+**验证：**
+- 全部 55 项 Python 测试通过（Triton 21 + CUDA 16 + cuTile 18）
+- Ampere 路径无回归（RTX 3070 Laptop 验证）
+
 ## 2026-05-27 #1 — cuTile Python 算子实现 + 四后端对比
 
 **内容：**

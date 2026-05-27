@@ -7,6 +7,7 @@ SwiGLU(x) = x * sigmoid(x)
 import cuda.tile as ct
 import torch
 from math import ceil
+from triton_kernels.gpu_utils import get_arch_params
 
 
 @ct.kernel
@@ -22,7 +23,7 @@ def swiglu_cutile(x: torch.Tensor) -> torch.Tensor:
     orig_shape = x.shape
     x_flat = x.reshape(-1)
     n = x_flat.shape[0]
-    TILE = 512
+    TILE = get_arch_params()["cutile_elementwise_tile"]
     out_flat = torch.empty_like(x_flat)
 
     grid = (ceil(n / TILE), 1, 1)

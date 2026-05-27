@@ -22,7 +22,25 @@ from triton_kernels.precision import precision
 # Blackwell: 更多 shared memory → 大 tile + 多 pipeline stages
 # Ampere: 较少 shared memory → 中等 tile + 适度 pipeline
 _MATMUL_CONFIGS = [
-    # --- 大 tile：Blackwell/Ada 最优 ---
+    # --- 大 tile：Blackwell 最优 ---
+    # SM 12.0: 228KB shared memory → 大 tile + 多 pipeline stages
+    triton.Config(
+        {"BLOCK_M": 128, "BLOCK_N": 128, "BLOCK_K": 128, "GROUP_SIZE_M": 8},
+        num_stages=4, num_warps=8,
+    ),
+    triton.Config(
+        {"BLOCK_M": 256, "BLOCK_N": 64, "BLOCK_K": 32, "GROUP_SIZE_M": 8},
+        num_stages=4, num_warps=8,
+    ),
+    triton.Config(
+        {"BLOCK_M": 128, "BLOCK_N": 128, "BLOCK_K": 64, "GROUP_SIZE_M": 8},
+        num_stages=5, num_warps=8,
+    ),
+    triton.Config(
+        {"BLOCK_M": 128, "BLOCK_N": 128, "BLOCK_K": 32, "GROUP_SIZE_M": 8},
+        num_stages=6, num_warps=16,
+    ),
+    # --- 中大 tile：Blackwell/Ada 最优 ---
     # 128x128 充分利用 shared memory，8 warps 提高 SM 占用率
     triton.Config(
         {"BLOCK_M": 128, "BLOCK_N": 128, "BLOCK_K": 32, "GROUP_SIZE_M": 8},

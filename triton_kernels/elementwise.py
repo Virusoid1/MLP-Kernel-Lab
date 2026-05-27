@@ -2,11 +2,21 @@
 Triton element-wise 算子：BiasAdd、ReLU、GELU、SiLU
 
 访存密集型算子，瓶颈在数据搬运。融合 kernel 减少全局内存往返。
+autotune 自动选择最优 BLOCK_SIZE 以适配不同 GPU 架构。
 """
 
 import torch
 import triton
 import triton.language as tl
+
+
+# elementwise kernel 的 autotune 配置
+_ELEMENTWISE_CONFIGS = [
+    triton.Config({"BLOCK_SIZE": 1024}, num_warps=2),
+    triton.Config({"BLOCK_SIZE": 2048}, num_warps=4),
+    triton.Config({"BLOCK_SIZE": 4096}, num_warps=4),
+    triton.Config({"BLOCK_SIZE": 8192}, num_warps=8),
+]
 
 
 @triton.jit
@@ -44,6 +54,7 @@ def bias_add(x: torch.Tensor, bias: torch.Tensor) -> torch.Tensor:
     return output
 
 
+@triton.autotune(configs=_ELEMENTWISE_CONFIGS, key=["n_elements"])
 @triton.jit
 def relu_kernel(
     input_ptr, output_ptr, n_elements,
@@ -62,12 +73,12 @@ def relu(x: torch.Tensor) -> torch.Tensor:
     """Triton ReLU。支持任意形状。"""
     output = torch.empty_like(x)
     n = x.numel()
-    BLOCK_SIZE = 1024
-
-    relu_kernel[(triton.cdiv(n, BLOCK_SIZE),)](x, output, n, BLOCK_SIZE=BLOCK_SIZE)
+    grid = lambda meta: (triton.cdiv(n, meta["BLOCK_SIZE"]),)
+    relu_kernel[grid](x, output, n)
     return output
 
 
+@triton.autotune(configs=_ELEMENTWISE_CONFIGS, key=["n_elements"])
 @triton.jit
 def gelu_kernel(
     input_ptr, output_ptr, n_elements,
@@ -96,12 +107,12 @@ def gelu(x: torch.Tensor) -> torch.Tensor:
     """Triton GELU（tanh 近似）。支持任意形状。"""
     output = torch.empty_like(x)
     n = x.numel()
-    BLOCK_SIZE = 1024
-
-    gelu_kernel[(triton.cdiv(n, BLOCK_SIZE),)](x, output, n, BLOCK_SIZE=BLOCK_SIZE)
+    grid = lambda meta: (triton.cdiv(n, meta["BLOCK_SIZE"]),)
+    gelu_kernel[grid](x, output, n)
     return output
 
 
+@triton.autotune(configs=_ELEMENTWISE_CONFIGS, key=["n_elements"])
 @triton.jit
 def silu_kernel(
     input_ptr, output_ptr, n_elements,
@@ -120,9 +131,8 @@ def silu(x: torch.Tensor) -> torch.Tensor:
     """Triton SiLU。支持任意形状。"""
     output = torch.empty_like(x)
     n = x.numel()
-    BLOCK_SIZE = 1024
-
-    silu_kernel[(triton.cdiv(n, BLOCK_SIZE),)](x, output, n, BLOCK_SIZE=BLOCK_SIZE)
+    grid = lambda meta: (triton.cdiv(n, meta["BLOCK_SIZE"]),)
+    silu_kernel[grid](x, output, n)
     return output
 
 

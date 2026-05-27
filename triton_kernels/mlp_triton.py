@@ -20,6 +20,16 @@ from triton_kernels.precision import precision
 
 _FUSED_MLP_CONFIGS = [
     # 大 tile：Blackwell 最优
+    # SM 12.0: 228KB shared memory → 大 tile + 多 pipeline stages
+    triton.Config(
+        {"BLOCK_M": 128, "BLOCK_N": 128, "BLOCK_K": 128, "GROUP_SIZE_M": 8},
+        num_stages=4, num_warps=8,
+    ),
+    triton.Config(
+        {"BLOCK_M": 256, "BLOCK_N": 64, "BLOCK_K": 32, "GROUP_SIZE_M": 8},
+        num_stages=4, num_warps=8,
+    ),
+    # 中大 tile：Blackwell/Ada 最优
     triton.Config(
         {"BLOCK_M": 128, "BLOCK_N": 128, "BLOCK_K": 32, "GROUP_SIZE_M": 8},
         num_stages=3, num_warps=8,

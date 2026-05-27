@@ -8,6 +8,7 @@ backward: d_x, d_gamma, d_beta
 import cuda.tile as ct
 import torch
 from math import ceil
+from triton_kernels.gpu_utils import get_arch_params
 
 
 @ct.kernel
@@ -51,7 +52,7 @@ def layernorm_forward(
 ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
     """返回 (y, mean, rstd)。x: (B, N)"""
     B, N = x.shape
-    TILE = 256
+    TILE = get_arch_params()["cutile_layernorm_tile"]
     y = torch.empty_like(x)
     mean = torch.empty(B, device=x.device, dtype=x.dtype)
     rstd = torch.empty(B, device=x.device, dtype=x.dtype)
@@ -114,7 +115,7 @@ def layernorm_backward(
 ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
     """返回 (d_x, d_gamma, d_beta)。"""
     B, N = x.shape
-    TILE = 256
+    TILE = get_arch_params()["cutile_layernorm_tile"]
     dx = torch.empty_like(x)
     d_gamma = torch.zeros_like(gamma)
     d_beta = torch.zeros_like(gamma)

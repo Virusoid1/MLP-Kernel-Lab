@@ -51,6 +51,51 @@ def supports_tf32() -> bool:
     return get_gpu_info()["cc"] >= (8, 0)
 
 
+# 架构感知参数缓存
+_arch_params_cache = None
+
+
+def get_arch_params() -> dict:
+    """返回当前架构的推荐参数范围。
+
+    不同架构的 shared memory 容量、SM 数量、Tensor Core 代数差异巨大，
+    因此 tile 大小、warp 数量、pipeline 深度的最优值也不同。
+    """
+    global _arch_params_cache
+    if _arch_params_cache is not None:
+        return _arch_params_cache
+
+    arch = get_gpu_arch()
+    if arch == "blackwell":
+        _arch_params_cache = {
+            "max_block_m": 256, "max_block_n": 256, "max_block_k": 128,
+            "max_stages": 6, "max_warps": 16,
+            "elementwise_block": 8192,
+            "cutile_matmul_tile": (64, 64, 32),
+            "cutile_elementwise_tile": 1024,
+            "cutile_layernorm_tile": 512,
+        }
+    elif arch in ("ada_loom", "ampere", "ampere_80"):
+        _arch_params_cache = {
+            "max_block_m": 128, "max_block_n": 128, "max_block_k": 64,
+            "max_stages": 4, "max_warps": 8,
+            "elementwise_block": 4096,
+            "cutile_matmul_tile": (32, 32, 32),
+            "cutile_elementwise_tile": 512,
+            "cutile_layernorm_tile": 256,
+        }
+    else:
+        _arch_params_cache = {
+            "max_block_m": 64, "max_block_n": 64, "max_block_k": 32,
+            "max_stages": 4, "max_warps": 4,
+            "elementwise_block": 2048,
+            "cutile_matmul_tile": (16, 16, 16),
+            "cutile_elementwise_tile": 256,
+            "cutile_layernorm_tile": 128,
+        }
+    return _arch_params_cache
+
+
 def get_cuda_arch_flags() -> list[str]:
     """返回当前 GPU 的 nvcc -arch 编译标志。"""
     cc = get_gpu_info()["cc"]

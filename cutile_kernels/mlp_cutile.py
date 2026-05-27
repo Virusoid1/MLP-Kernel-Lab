@@ -7,6 +7,7 @@ cuTile 融合 MLP first layer kernel
 import cuda.tile as ct
 import torch
 from math import ceil
+from triton_kernels.gpu_utils import get_arch_params
 
 
 @ct.kernel
@@ -45,7 +46,7 @@ def mlp_first_layer_cutile(
     """融合 matmul + bias + GELU。x: (M, K), w: (K, N), bias: (N,) -> (M, N)"""
     M, K = x.shape
     N = weight.shape[1]
-    TM, TN, TK = 32, 32, 32
+    TM, TN, TK = get_arch_params()["cutile_matmul_tile"]
     out = torch.empty((M, N), device=x.device, dtype=torch.float32)
 
     grid = (ceil(M / TM), ceil(N / TN), 1)

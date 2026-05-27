@@ -23,6 +23,9 @@
 __global__ void matmul_wmma_kernel(const float* __restrict__ A, const float* __restrict__ B, float* __restrict__ C, int M, int K, int N);
 __global__ void matmul_wmma_transB_kernel(const float* __restrict__ A, const float* __restrict__ B, float* __restrict__ C, int M, int N, int K);
 __global__ void matmul_wmma_transA_kernel(const float* __restrict__ A, const float* __restrict__ B, float* __restrict__ C, int M, int K, int N);
+__global__ void matmul_wmma64_kernel(const float* __restrict__ A, const float* __restrict__ B, float* __restrict__ C, int M, int K, int N);
+__global__ void matmul_wmma64_transB_kernel(const float* __restrict__ A, const float* __restrict__ B, float* __restrict__ C, int M, int N, int K);
+__global__ void matmul_wmma64_transA_kernel(const float* __restrict__ A, const float* __restrict__ B, float* __restrict__ C, int M, int K, int N);
 
 
 // ============================================================
@@ -166,6 +169,18 @@ void launch_matmul_tiled(
         dim3 block(32, 32);
         dim3 grid((N + 31) / 32, (M + 31) / 32);
         matmul_tiled_kernel<32, 32, 64><<<grid, block, 0, stream>>>(A, B, C, M, K, N);
+    } else if (BLOCK_M == 64 && BLOCK_N == 64 && BLOCK_K == 32) {
+        dim3 block(64, 64);
+        dim3 grid((N + 63) / 64, (M + 63) / 64);
+        matmul_tiled_kernel<64, 64, 32><<<grid, block, 0, stream>>>(A, B, C, M, K, N);
+    } else if (BLOCK_M == 64 && BLOCK_N == 64 && BLOCK_K == 64) {
+        dim3 block(64, 64);
+        dim3 grid((N + 63) / 64, (M + 63) / 64);
+        matmul_tiled_kernel<64, 64, 64><<<grid, block, 0, stream>>>(A, B, C, M, K, N);
+    } else if (BLOCK_M == 128 && BLOCK_N == 64 && BLOCK_K == 32) {
+        dim3 block(64, 128);
+        dim3 grid((N + 63) / 64, (M + 127) / 128);
+        matmul_tiled_kernel<128, 64, 32><<<grid, block, 0, stream>>>(A, B, C, M, K, N);
     } else {
         // fallback: 最小安全配置
         dim3 block(16, 16);
@@ -183,12 +198,23 @@ void launch_matmul_tiled_auto(
     int max_dim = M > N ? M : N;
     max_dim = max_dim > K ? max_dim : K;
 
-    if (max_dim >= 512) {
-        // WMMA FP16 Tensor Core: 每个 block 32x32 输出，4 warp
+    if (max_dim >= 1024) {
+        // WMMA64 FP16 Tensor Core: 每个 block 64x64 输出，8 warp
+        constexpr int TILE = 64;
+        dim3 block(TILE / 16 * TILE / 16 * 32);  // 256 threads
+        dim3 grid((N + TILE - 1) / TILE, (M + TILE - 1) / TILE);
+        matmul_wmma64_kernel<<<grid, block, 0, stream>>>(A, B, C, M, K, N);
+    } else if (max_dim >= 512) {
+        // WMMA32 FP16 Tensor Core: 每个 block 32x32 输出，4 warp
         constexpr int TILE = 32;
         dim3 block(TILE / 16 * TILE / 16 * 32);  // 128 threads
         dim3 grid((N + TILE - 1) / TILE, (M + TILE - 1) / TILE);
         matmul_wmma_kernel<<<grid, block, 0, stream>>>(A, B, C, M, K, N);
+    } else if (max_dim >= 256) {
+        // 大 tile: FP32 shared memory tiled（Blackwell 新增）
+        dim3 block(64, 64);
+        dim3 grid((N + 63) / 64, (M + 63) / 64);
+        matmul_tiled_kernel<64, 64, 32><<<grid, block, 0, stream>>>(A, B, C, M, K, N);
     } else if (max_dim >= 128) {
         dim3 block(32, 32);
         dim3 grid((N + 31) / 32, (M + 31) / 32);
@@ -371,7 +397,12 @@ void launch_mlp_fused_first_layer(
     int max_dim = M > N ? M : N;
     max_dim = max_dim > K ? max_dim : K;
 
-    if (max_dim >= 128) {
+    if (max_dim >= 512) {
+        dim3 block(64, 64);
+        dim3 grid((N + 63) / 64, (M + 63) / 64);
+        mlp_fused_first_layer_kernel<64, 64, 32><<<grid, block, 0, stream>>>(
+            X, W1, bias, H, M, K, N);
+    } else if (max_dim >= 128) {
         dim3 block(32, 32);
         dim3 grid((N + 31) / 32, (M + 31) / 32);
         mlp_fused_first_layer_kernel<32, 32, 32><<<grid, block, 0, stream>>>(
@@ -467,7 +498,12 @@ void launch_matmul_transB(
     int max_dim = M > K ? M : K;
     max_dim = max_dim > N ? max_dim : N;
 
-    if (max_dim >= 512) {
+    if (max_dim >= 1024) {
+        constexpr int TILE = 64;
+        dim3 block(TILE / 16 * TILE / 16 * 32);
+        dim3 grid((K + TILE - 1) / TILE, (M + TILE - 1) / TILE);
+        matmul_wmma64_transB_kernel<<<grid, block, 0, stream>>>(A, B, C, M, N, K);
+    } else if (max_dim >= 512) {
         constexpr int TILE = 32;
         dim3 block(TILE / 16 * TILE / 16 * 32);
         dim3 grid((K + TILE - 1) / TILE, (M + TILE - 1) / TILE);
@@ -535,7 +571,12 @@ void launch_matmul_transA(
     int max_dim = K > N ? K : N;
     max_dim = max_dim > M ? max_dim : M;
 
-    if (max_dim >= 512) {
+    if (max_dim >= 1024) {
+        constexpr int TILE = 64;
+        dim3 block(TILE / 16 * TILE / 16 * 32);
+        dim3 grid((N + TILE - 1) / TILE, (K + TILE - 1) / TILE);
+        matmul_wmma64_transA_kernel<<<grid, block, 0, stream>>>(A, B, C, M, K, N);
+    } else if (max_dim >= 512) {
         constexpr int TILE = 32;
         dim3 block(TILE / 16 * TILE / 16 * 32);
         dim3 grid((N + TILE - 1) / TILE, (K + TILE - 1) / TILE);
@@ -972,6 +1013,202 @@ void matmul_wmma_transA_kernel(
         }
 
         // sB: B[m_start+r][block_col+c]
+        for (int i = threadIdx.x; i < R * TILE; i += blockDim.x) {
+            int r = i / TILE, c = i % TILE;
+            int gr = m_start + r, gc = block_col + c;
+            sB[r][c] = (gr < M && gc < N)
+                        ? __float2half(B[gr * N + gc]) : __float2half(0.0f);
+        }
+
+        __syncthreads();
+
+        nvcuda::wmma::fragment<nvcuda::wmma::matrix_a, 16, 16, 16, half, nvcuda::wmma::row_major> a_frag;
+        nvcuda::wmma::fragment<nvcuda::wmma::matrix_b, 16, 16, 16, half, nvcuda::wmma::row_major> b_frag;
+        nvcuda::wmma::load_matrix_sync(a_frag, &sAT[warp_row][0], R);
+        nvcuda::wmma::load_matrix_sync(b_frag, &sB[0][warp_col], TILE);
+        nvcuda::wmma::mma_sync(acc, a_frag, b_frag, acc);
+
+        __syncthreads();
+    }
+
+    nvcuda::wmma::store_matrix_sync(&sC[warp_row][warp_col], acc, TILE, nvcuda::wmma::mem_row_major);
+    __syncthreads();
+
+    for (int i = threadIdx.x; i < TILE * TILE; i += blockDim.x) {
+        int r = i / TILE, c = i % TILE;
+        int gr = block_row + r, gc = block_col + c;
+        if (gr < K && gc < N)
+            C[gr * N + gc] = sC[r][c];
+    }
+}
+
+// ============================================================
+// WMMA64 FP16 Tensor Core kernels (SM 8.0+, 大 tile 64x64)
+// 每个 warp (32 threads) 协作计算 16x16 输出 tile
+// Block 包含 8 warp (256 threads)，覆盖 64x64 输出区域
+// R=32: shared memory 中 K 方向的内积步长
+// ============================================================
+
+// C = A @ B, A:(M,K) B:(K,N) C:(M,N)
+__global__ __launch_bounds__(256)
+void matmul_wmma64_kernel(
+    const float* __restrict__ A, const float* __restrict__ B, float* __restrict__ C,
+    int M, int K, int N)
+{
+    constexpr int TILE = 64;
+    constexpr int R = 32;
+    __shared__ half sA[TILE][R];
+    __shared__ half sB[R][TILE];
+    __shared__ float sC[TILE][TILE];
+
+    int warp_id = threadIdx.x / 32;
+    int warp_m = warp_id / (TILE / 16);  // 0..3
+    int warp_n = warp_id % (TILE / 16);  // 0..3
+    int warp_row = warp_m * 16;
+    int warp_col = warp_n * 16;
+
+    int block_row = blockIdx.y * TILE;
+    int block_col = blockIdx.x * TILE;
+
+    nvcuda::wmma::fragment<nvcuda::wmma::accumulator, 16, 16, 16, float> acc;
+    nvcuda::wmma::fill_fragment(acc, 0.0f);
+
+    for (int kt = 0; kt < (K + R - 1) / R; ++kt) {
+        int k_start = kt * R;
+
+        for (int i = threadIdx.x; i < TILE * R; i += blockDim.x) {
+            int r = i / R, c = i % R;
+            int gr = block_row + r, gc = k_start + c;
+            sA[r][c] = (gr < M && gc < K)
+                        ? __float2half(A[gr * K + gc]) : __float2half(0.0f);
+        }
+
+        for (int i = threadIdx.x; i < R * TILE; i += blockDim.x) {
+            int r = i / TILE, c = i % TILE;
+            int gr = k_start + r, gc = block_col + c;
+            sB[r][c] = (gr < K && gc < N)
+                        ? __float2half(B[gr * N + gc]) : __float2half(0.0f);
+        }
+
+        __syncthreads();
+
+        nvcuda::wmma::fragment<nvcuda::wmma::matrix_a, 16, 16, 16, half, nvcuda::wmma::row_major> a_frag;
+        nvcuda::wmma::fragment<nvcuda::wmma::matrix_b, 16, 16, 16, half, nvcuda::wmma::row_major> b_frag;
+        nvcuda::wmma::load_matrix_sync(a_frag, &sA[warp_row][0], R);
+        nvcuda::wmma::load_matrix_sync(b_frag, &sB[0][warp_col], TILE);
+        nvcuda::wmma::mma_sync(acc, a_frag, b_frag, acc);
+
+        __syncthreads();
+    }
+
+    nvcuda::wmma::store_matrix_sync(&sC[warp_row][warp_col], acc, TILE, nvcuda::wmma::mem_row_major);
+    __syncthreads();
+
+    for (int i = threadIdx.x; i < TILE * TILE; i += blockDim.x) {
+        int r = i / TILE, c = i % TILE;
+        int gr = block_row + r, gc = block_col + c;
+        if (gr < M && gc < N)
+            C[gr * N + gc] = sC[r][c];
+    }
+}
+
+// C = A @ B^T, A:(M,N) B:(K,N) C:(M,K)
+__global__ __launch_bounds__(256)
+void matmul_wmma64_transB_kernel(
+    const float* __restrict__ A, const float* __restrict__ B, float* __restrict__ C,
+    int M, int N, int K)
+{
+    constexpr int TILE = 64;
+    constexpr int R = 32;
+    __shared__ half sA[TILE][R];
+    __shared__ half sBT[R][TILE];
+    __shared__ float sC[TILE][TILE];
+
+    int warp_id = threadIdx.x / 32;
+    int warp_m = warp_id / (TILE / 16);
+    int warp_k = warp_id % (TILE / 16);
+    int warp_row = warp_m * 16;
+    int warp_col = warp_k * 16;
+
+    int block_row = blockIdx.y * TILE;  // M 方向
+    int block_col = blockIdx.x * TILE;  // K 方向
+
+    nvcuda::wmma::fragment<nvcuda::wmma::accumulator, 16, 16, 16, float> acc;
+    nvcuda::wmma::fill_fragment(acc, 0.0f);
+
+    for (int nt = 0; nt < (N + R - 1) / R; ++nt) {
+        int n_start = nt * R;
+
+        for (int i = threadIdx.x; i < TILE * R; i += blockDim.x) {
+            int r = i / R, c = i % R;
+            int gr = block_row + r, gc = n_start + c;
+            sA[r][c] = (gr < M && gc < N)
+                        ? __float2half(A[gr * N + gc]) : __float2half(0.0f);
+        }
+
+        for (int i = threadIdx.x; i < R * TILE; i += blockDim.x) {
+            int nl = i / TILE, kl = i % TILE;
+            int b_k = block_col + kl, b_n = n_start + nl;
+            sBT[nl][kl] = (b_k < K && b_n < N)
+                           ? __float2half(B[b_k * N + b_n]) : __float2half(0.0f);
+        }
+
+        __syncthreads();
+
+        nvcuda::wmma::fragment<nvcuda::wmma::matrix_a, 16, 16, 16, half, nvcuda::wmma::row_major> a_frag;
+        nvcuda::wmma::fragment<nvcuda::wmma::matrix_b, 16, 16, 16, half, nvcuda::wmma::row_major> b_frag;
+        nvcuda::wmma::load_matrix_sync(a_frag, &sA[warp_row][0], R);
+        nvcuda::wmma::load_matrix_sync(b_frag, &sBT[0][warp_col], TILE);
+        nvcuda::wmma::mma_sync(acc, a_frag, b_frag, acc);
+
+        __syncthreads();
+    }
+
+    nvcuda::wmma::store_matrix_sync(&sC[warp_row][warp_col], acc, TILE, nvcuda::wmma::mem_row_major);
+    __syncthreads();
+
+    for (int i = threadIdx.x; i < TILE * TILE; i += blockDim.x) {
+        int r = i / TILE, c = i % TILE;
+        int gr = block_row + r, gc = block_col + c;
+        if (gr < M && gc < K)
+            C[gr * K + gc] = sC[r][c];
+    }
+}
+
+// C = A^T @ B, A:(M,K) B:(M,N) C:(K,N)
+__global__ __launch_bounds__(256)
+void matmul_wmma64_transA_kernel(
+    const float* __restrict__ A, const float* __restrict__ B, float* __restrict__ C,
+    int M, int K, int N)
+{
+    constexpr int TILE = 64;
+    constexpr int R = 32;
+    __shared__ half sAT[TILE][R];
+    __shared__ half sB[R][TILE];
+    __shared__ float sC[TILE][TILE];
+
+    int warp_id = threadIdx.x / 32;
+    int warp_k = warp_id / (TILE / 16);
+    int warp_n = warp_id % (TILE / 16);
+    int warp_row = warp_k * 16;
+    int warp_col = warp_n * 16;
+
+    int block_row = blockIdx.y * TILE;  // K 方向
+    int block_col = blockIdx.x * TILE;  // N 方向
+
+    nvcuda::wmma::fragment<nvcuda::wmma::accumulator, 16, 16, 16, float> acc;
+    nvcuda::wmma::fill_fragment(acc, 0.0f);
+
+    for (int mt = 0; mt < (M + R - 1) / R; ++mt) {
+        int m_start = mt * R;
+
+        for (int i = threadIdx.x; i < TILE * R; i += blockDim.x) {
+            int kl = i / R, ml = i % R;
+            int a_m = m_start + ml, a_k = block_row + kl;
+            sAT[kl][ml] = (a_m < M && a_k < K)
+                           ? __float2half(A[a_m * K + a_k]) : __float2half(0.0f);
+        }
+
         for (int i = threadIdx.x; i < R * TILE; i += blockDim.x) {
             int r = i / TILE, c = i % TILE;
             int gr = m_start + r, gc = block_col + c;

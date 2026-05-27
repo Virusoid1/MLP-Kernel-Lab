@@ -27,6 +27,14 @@ from triton_kernels.precision import precision
 _BACKWARD_A_CONFIGS = [
     # 大 tile：Blackwell 最优
     triton.Config(
+        {"BLOCK_M": 128, "BLOCK_N": 64, "BLOCK_K": 64, "GROUP_SIZE_M": 8},
+        num_stages=4, num_warps=8,
+    ),
+    triton.Config(
+        {"BLOCK_M": 128, "BLOCK_N": 128, "BLOCK_K": 32, "GROUP_SIZE_M": 8},
+        num_stages=5, num_warps=8,
+    ),
+    triton.Config(
         {"BLOCK_M": 64, "BLOCK_N": 32, "BLOCK_K": 64, "GROUP_SIZE_M": 8},
         num_stages=3, num_warps=8,
     ),
@@ -56,6 +64,14 @@ _BACKWARD_A_CONFIGS = [
 
 _BACKWARD_B_CONFIGS = [
     # 大 tile：Blackwell 最优
+    triton.Config(
+        {"BLOCK_M": 32, "BLOCK_N": 128, "BLOCK_K": 64, "GROUP_SIZE_K": 8},
+        num_stages=4, num_warps=8,
+    ),
+    triton.Config(
+        {"BLOCK_M": 64, "BLOCK_N": 128, "BLOCK_K": 32, "GROUP_SIZE_K": 8},
+        num_stages=5, num_warps=8,
+    ),
     triton.Config(
         {"BLOCK_M": 32, "BLOCK_N": 64, "BLOCK_K": 64, "GROUP_SIZE_K": 8},
         num_stages=3, num_warps=8,
@@ -222,6 +238,8 @@ def matmul_backward_b(A: torch.Tensor, dC: torch.Tensor) -> torch.Tensor:
 # ============ Activation Backward autotune 配置 ============
 
 _ACT_BWD_CONFIGS = [
+    triton.Config({"BLOCK_SIZE": 8192}, num_warps=8),
+    triton.Config({"BLOCK_SIZE": 8192}, num_warps=16),
     triton.Config({"BLOCK_SIZE": 512}, num_warps=2),
     triton.Config({"BLOCK_SIZE": 1024}, num_warps=4),
     triton.Config({"BLOCK_SIZE": 2048}, num_warps=4),

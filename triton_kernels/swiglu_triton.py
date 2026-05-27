@@ -3,13 +3,22 @@ Triton fused SwiGLU kernel
 
 hidden = SiLU(gate) * up
 用于 Llama/Qwen 系列 FFN
+autotune 自动选择最优 BLOCK_SIZE 以适配不同 GPU 架构。
 """
 
 import torch
 import triton
 import triton.language as tl
 
+_SWIGLU_CONFIGS = [
+    triton.Config({"BLOCK_SIZE": 1024}, num_warps=2),
+    triton.Config({"BLOCK_SIZE": 2048}, num_warps=4),
+    triton.Config({"BLOCK_SIZE": 4096}, num_warps=4),
+    triton.Config({"BLOCK_SIZE": 8192}, num_warps=8),
+]
 
+
+@triton.autotune(configs=_SWIGLU_CONFIGS, key=["n_elements"])
 @triton.jit
 def swiglu_kernel(
     gate_ptr, up_ptr, output_ptr,
@@ -41,12 +50,10 @@ def swiglu_triton(gate: torch.Tensor, up: torch.Tensor) -> torch.Tensor:
     output = torch.empty_like(gate)
     n_elements = gate.numel()
 
-    BLOCK_SIZE = 1024
-    grid = (triton.cdiv(n_elements, BLOCK_SIZE),)
+    grid = lambda meta: (triton.cdiv(n_elements, meta["BLOCK_SIZE"]),)
 
     swiglu_kernel[grid](
         gate, up, output,
         n_elements,
-        BLOCK_SIZE=BLOCK_SIZE,
     )
     return output

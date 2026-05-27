@@ -14,6 +14,7 @@ Activation Backward:
 import cuda.tile as ct
 import torch
 from math import ceil
+from triton_kernels.gpu_utils import get_arch_params
 
 
 # ============ MatMul Backward: dA = dC @ B^T ============
@@ -45,7 +46,7 @@ def matmul_backward_a(dC: torch.Tensor, B: torch.Tensor) -> torch.Tensor:
     """dA = dC @ B^T。dC: (M, N), B: (K, N) -> dA: (M, K)"""
     M, N = dC.shape
     K = B.shape[0]
-    TM, TN, TK = 32, 32, 32
+    TM, TN, TK = get_arch_params()["cutile_matmul_tile"]
     dA = torch.empty((M, K), device=dC.device, dtype=torch.float32)
 
     grid = (ceil(M / TM), ceil(K / TK), 1)
@@ -81,7 +82,7 @@ def matmul_backward_b(A: torch.Tensor, dC: torch.Tensor) -> torch.Tensor:
     """dB = A^T @ dC。A: (M, K), dC: (M, N) -> dB: (K, N)"""
     M, K = A.shape
     N = dC.shape[1]
-    TM, TN, TK = 32, 32, 32
+    TM, TN, TK = get_arch_params()["cutile_matmul_tile"]
     dB = torch.empty((K, N), device=A.device, dtype=torch.float32)
 
     grid = (ceil(K / TK), ceil(N / TN), 1)
@@ -106,7 +107,7 @@ def relu_backward(grad_output: torch.Tensor, x: torch.Tensor) -> torch.Tensor:
     g_flat = grad_output.reshape(-1)
     x_flat = x.reshape(-1)
     n = g_flat.shape[0]
-    TILE = 512
+    TILE = get_arch_params()["cutile_elementwise_tile"]
     out_flat = torch.empty_like(g_flat)
 
     grid = (ceil(n / TILE), 1, 1)
@@ -137,7 +138,7 @@ def gelu_backward(grad_output: torch.Tensor, x: torch.Tensor) -> torch.Tensor:
     g_flat = grad_output.reshape(-1)
     x_flat = x.reshape(-1)
     n = g_flat.shape[0]
-    TILE = 512
+    TILE = get_arch_params()["cutile_elementwise_tile"]
     out_flat = torch.empty_like(g_flat)
 
     grid = (ceil(n / TILE), 1, 1)
@@ -164,7 +165,7 @@ def silu_backward(grad_output: torch.Tensor, x: torch.Tensor) -> torch.Tensor:
     g_flat = grad_output.reshape(-1)
     x_flat = x.reshape(-1)
     n = g_flat.shape[0]
-    TILE = 512
+    TILE = get_arch_params()["cutile_elementwise_tile"]
     out_flat = torch.empty_like(g_flat)
 
     grid = (ceil(n / TILE), 1, 1)
