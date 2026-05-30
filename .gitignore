@@ -41,3 +41,9 @@ env/
 
 # claude
 .claude/
+
+# Naive build output
+naive/naive_ops
+
+# Resume (not for repo)
+RESUME.md
