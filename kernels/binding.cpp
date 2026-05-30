@@ -86,6 +86,32 @@ void launch_layernorm_backward(
     float* DX, float* DGamma, float* DBeta,
     int B, int N, cudaStream_t stream);
 
+void launch_softmax(
+    const float* input, float* output,
+    int M, int N, cudaStream_t stream);
+
+void launch_maxpool2d(
+    const float* input, float* output,
+    int N, int C, int H, int W,
+    int H_out, int W_out,
+    int kernel_size, int stride, int padding,
+    cudaStream_t stream);
+
+void launch_avgpool2d(
+    const float* input, float* output,
+    int N, int C, int H, int W,
+    int H_out, int W_out,
+    int kernel_size, int stride, int padding,
+    cudaStream_t stream);
+
+void launch_im2col(
+    const float* input, float* col,
+    int N, int C, int H, int W,
+    int H_out, int W_out,
+    int KH, int KW,
+    int stride, int padding,
+    cudaStream_t stream);
+
 // ============================================================
 // 输入校验辅助宏
 // ============================================================
@@ -427,6 +453,139 @@ std::tuple<torch::Tensor, torch::Tensor, torch::Tensor> layernorm_backward(
 }
 
 // ============================================================
+// softmax
+// ============================================================
+
+torch::Tensor softmax(torch::Tensor x) {
+    CHECK_CUDA(x); CHECK_CONTIGUOUS(x); CHECK_FLOAT32(x);
+    TORCH_CHECK(x.dim() == 2, "x must be 2D (M, N)");
+
+    int M = x.size(0), N = x.size(1);
+    auto output = torch::empty_like(x);
+    launch_softmax(
+        x.data_ptr<float>(), output.data_ptr<float>(),
+        M, N, _get_cuda_stream(x));
+    return output;
+}
+
+// ============================================================
+// maxpool2d
+// ============================================================
+
+torch::Tensor maxpool2d(
+    torch::Tensor x, int kernel_size, int stride, int padding)
+{
+    CHECK_CUDA(x); CHECK_CONTIGUOUS(x); CHECK_FLOAT32(x);
+    TORCH_CHECK(x.dim() == 4, "x must be 4D (N, C, H, W)");
+
+    int N = x.size(0), C = x.size(1), H = x.size(2), W = x.size(3);
+    int H_out = (H + 2 * padding - kernel_size) / stride + 1;
+    int W_out = (W + 2 * padding - kernel_size) / stride + 1;
+
+    auto output = torch::full({N, C, H_out, W_out}, -1e30f, x.options());
+    launch_maxpool2d(
+        x.data_ptr<float>(), output.data_ptr<float>(),
+        N, C, H, W, H_out, W_out,
+        kernel_size, stride, padding,
+        _get_cuda_stream(x));
+    return output;
+}
+
+// ============================================================
+// avgpool2d
+// ============================================================
+
+torch::Tensor avgpool2d(
+    torch::Tensor x, int kernel_size, int stride, int padding)
+{
+    CHECK_CUDA(x); CHECK_CONTIGUOUS(x); CHECK_FLOAT32(x);
+    TORCH_CHECK(x.dim() == 4, "x must be 4D (N, C, H, W)");
+
+    int N = x.size(0), C = x.size(1), H = x.size(2), W = x.size(3);
+    int H_out = (H + 2 * padding - kernel_size) / stride + 1;
+    int W_out = (W + 2 * padding - kernel_size) / stride + 1;
+
+    auto output = torch::zeros({N, C, H_out, W_out}, x.options());
+    launch_avgpool2d(
+        x.data_ptr<float>(), output.data_ptr<float>(),
+        N, C, H, W, H_out, W_out,
+        kernel_size, stride, padding,
+        _get_cuda_stream(x));
+    return output;
+}
+
+// ============================================================
+// im2col (Conv2D 前置展开)
+// ============================================================
+
+torch::Tensor im2col(
+    torch::Tensor x, int KH, int KW, int stride, int padding)
+{
+    CHECK_CUDA(x); CHECK_CONTIGUOUS(x); CHECK_FLOAT32(x);
+    TORCH_CHECK(x.dim() == 4, "x must be 4D (N, C, H, W)");
+
+    int N = x.size(0), C = x.size(1), H = x.size(2), W = x.size(3);
+    int H_out = (H + 2 * padding - KH) / stride + 1;
+    int W_out = (W + 2 * padding - KW) / stride + 1;
+
+    auto col = torch::zeros({N * H_out * W_out, C * KH * KW}, x.options());
+    launch_im2col(
+        x.data_ptr<float>(), col.data_ptr<float>(),
+        N, C, H, W, H_out, W_out, KH, KW, stride, padding,
+        _get_cuda_stream(x));
+    return col;
+}
+
+// ============================================================
+// conv2d (im2col + tiled matmul + bias)
+// ============================================================
+
+torch::Tensor conv2d(
+    torch::Tensor input, torch::Tensor weight,
+    torch::Tensor bias, int stride, int padding)
+{
+    CHECK_CUDA(input); CHECK_CUDA(weight);
+    CHECK_CONTIGUOUS(input); CHECK_CONTIGUOUS(weight);
+    CHECK_FLOAT32(input); CHECK_FLOAT32(weight);
+    TORCH_CHECK(input.dim() == 4, "input must be 4D (N, C_in, H, W)");
+    TORCH_CHECK(weight.dim() == 4, "weight must be 4D (C_out, C_in, KH, KW)");
+
+    int N = input.size(0), C_in = input.size(1), H = input.size(2), W = input.size(3);
+    int C_out = weight.size(0), KH = weight.size(2), KW = weight.size(3);
+    int H_out = (H + 2 * padding - KH) / stride + 1;
+    int W_out = (W + 2 * padding - KW) / stride + 1;
+
+    // im2col
+    auto col = torch::zeros({N * H_out * W_out, C_in * KH * KW}, input.options());
+    launch_im2col(
+        input.data_ptr<float>(), col.data_ptr<float>(),
+        N, C_in, H, W, H_out, W_out, KH, KW, stride, padding,
+        _get_cuda_stream(input));
+
+    // weight reshape + transpose: (C_out, C_in*KH*KW) -> (C_in*KH*KW, C_out)
+    auto w_flat = weight.reshape({C_out, -1}).transpose(0, 1).contiguous();
+
+    // matmul via tiled_auto
+    auto output = torch::empty({N * H_out * W_out, C_out}, input.options());
+    launch_matmul_tiled_auto(
+        col.data_ptr<float>(), w_flat.data_ptr<float>(), output.data_ptr<float>(),
+        N * H_out * W_out, C_in * KH * KW, C_out,
+        _get_cuda_stream(input));
+
+    // add bias
+    if (bias.numel() > 0) {
+        output = output + bias.unsqueeze(0);
+    }
+
+    // reshape to (N, C_out, H_out, W_out)
+    output = output.reshape({N, H_out * W_out, C_out})
+                 .permute({0, 2, 1})
+                 .reshape({N, C_out, H_out, W_out})
+                 .contiguous();
+    return output;
+}
+
+// ============================================================
 // 注册模块
 // ============================================================
 
@@ -466,4 +625,19 @@ PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {
           py::arg("x"), py::arg("gamma"), py::arg("beta"), py::arg("eps") = 1e-5);
     m.def("layernorm_backward", &layernorm_backward,
           "CUDA LayerNorm backward: returns (dx, d_gamma, d_beta)");
+
+    m.def("softmax", &softmax, "CUDA row-wise softmax: (M, N) -> (M, N)");
+    m.def("maxpool2d", &maxpool2d, "CUDA MaxPool2D",
+          py::arg("x"), py::arg("kernel_size"),
+          py::arg("stride"), py::arg("padding") = 0);
+    m.def("avgpool2d", &avgpool2d, "CUDA AvgPool2D",
+          py::arg("x"), py::arg("kernel_size"),
+          py::arg("stride"), py::arg("padding") = 0);
+    m.def("im2col", &im2col, "CUDA im2col for Conv2D",
+          py::arg("x"), py::arg("KH"), py::arg("KW"),
+          py::arg("stride"), py::arg("padding") = 0);
+    m.def("conv2d", &conv2d, "CUDA Conv2D (im2col + tiled matmul)",
+          py::arg("input"), py::arg("weight"),
+          py::arg("bias") = torch::Tensor(),
+          py::arg("stride") = 1, py::arg("padding") = 0);
 }

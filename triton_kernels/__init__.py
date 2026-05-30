@@ -8,6 +8,9 @@ dropout:     Inverted dropout
 loss:        融合 CrossEntropy
 mlp_triton:  融合 MLP first layer (matmul+bias+GELU)
 swiglu:      融合 SwiGLU
+conv:        Conv2D (im2col + matmul)
+pool:        MaxPool2D, AvgPool2D
+softmax:     逐行 Softmax
 """
 
 from triton_kernels.matmul import tiled_matmul
@@ -22,3 +25,6 @@ from triton_kernels.mlp_triton import mlp_first_layer_triton
 from triton_kernels.swiglu_triton import swiglu_triton
 from triton_kernels.precision import precision, set_precision
 from triton_kernels.layernorm import layernorm_forward, layernorm_backward
+from triton_kernels.conv import conv2d_triton
+from triton_kernels.pool import maxpool2d, avgpool2d
+from triton_kernels.softmax import softmax

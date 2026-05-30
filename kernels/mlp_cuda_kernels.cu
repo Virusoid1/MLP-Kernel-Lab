@@ -840,6 +840,240 @@ void launch_layernorm_backward(
 }
 
 // ============================================================
+// Softmax (逐行, 数值稳定)
+// ============================================================
+
+__global__ void softmax_kernel(
+    const float* __restrict__ input, float* __restrict__ output,
+    int M, int N)
+{
+    int row = blockIdx.x;
+    if (row >= M) return;
+
+    const float* x_row = input + row * N;
+    float* y_row = output + row * N;
+
+    int n_warps = (blockDim.x + 31) / 32;
+    int lane = threadIdx.x % 32;
+    int wid = threadIdx.x / 32;
+
+    // 第一遍：找行最大值
+    float max_val = -FLT_MAX;
+    for (int i = threadIdx.x; i < N; i += blockDim.x)
+        max_val = fmaxf(max_val, x_row[i]);
+
+    // warp reduce max
+    for (int offset = 16; offset > 0; offset /= 2)
+        max_val = fmaxf(max_val, __shfl_down_sync(0xffffffff, max_val, offset));
+
+    // block reduce max: warp 结果写入 shared，再 reduce
+    extern __shared__ float s_mem[];
+    float* s_max_arr = s_mem;
+    float* s_sum_arr = s_mem + n_warps;
+
+    if (lane == 0) s_max_arr[wid] = max_val;
+    __syncthreads();
+
+    max_val = (threadIdx.x < n_warps) ? s_max_arr[threadIdx.x] : -FLT_MAX;
+    for (int offset = n_warps / 2; offset > 0; offset /= 2)
+        max_val = fmaxf(max_val, __shfl_down_sync(0xffffffff, max_val, offset));
+    if (threadIdx.x == 0) s_max_arr[0] = max_val;
+    __syncthreads();
+    max_val = s_max_arr[0];
+
+    // 第二遍：exp + sum
+    float sum = 0.0f;
+    for (int i = threadIdx.x; i < N; i += blockDim.x)
+        sum += expf(x_row[i] - max_val);
+
+    // warp reduce sum
+    for (int offset = 16; offset > 0; offset /= 2)
+        sum += __shfl_down_sync(0xffffffff, sum, offset);
+
+    // block reduce sum
+    if (lane == 0) s_sum_arr[wid] = sum;
+    __syncthreads();
+
+    sum = (threadIdx.x < n_warps) ? s_sum_arr[threadIdx.x] : 0.0f;
+    for (int offset = n_warps / 2; offset > 0; offset /= 2)
+        sum += __shfl_down_sync(0xffffffff, sum, offset);
+    if (threadIdx.x == 0) s_sum_arr[0] = sum;
+    __syncthreads();
+    float inv_sum = 1.0f / s_sum_arr[0];
+
+    // 第三遍：写出
+    for (int i = threadIdx.x; i < N; i += blockDim.x)
+        y_row[i] = expf(x_row[i] - max_val) * inv_sum;
+}
+
+void launch_softmax(
+    const float* input, float* output,
+    int M, int N, cudaStream_t stream)
+{
+    int block_size = (N + 31) / 32 * 32;
+    if (block_size > 1024) block_size = 1024;
+    int n_warps = (block_size + 31) / 32;
+    int smem = n_warps * 2 * sizeof(float);
+    softmax_kernel<<<M, block_size, smem, stream>>>(input, output, M, N);
+}
+
+// ============================================================
+// MaxPool2D (NCHW)
+// ============================================================
+
+__global__ void maxpool2d_kernel(
+    const float* __restrict__ input, float* __restrict__ output,
+    int N, int C, int H, int W,
+    int H_out, int W_out,
+    int kernel_size, int stride, int padding)
+{
+    int idx = blockIdx.x * blockDim.x + threadIdx.x;
+    int total = N * C * H_out * W_out;
+    if (idx >= total) return;
+
+    int w_out = idx % W_out;
+    int h_out = (idx / W_out) % H_out;
+    int nc = idx / (H_out * W_out);
+    int c = nc % C;
+    int n = nc / C;
+
+    int h_start = h_out * stride - padding;
+    int w_start = w_out * stride - padding;
+
+    float max_val = -FLT_MAX;
+    for (int kh = 0; kh < kernel_size; ++kh) {
+        int h_in = h_start + kh;
+        if (h_in < 0 || h_in >= H) continue;
+        for (int kw = 0; kw < kernel_size; ++kw) {
+            int w_in = w_start + kw;
+            if (w_in < 0 || w_in >= W) continue;
+            float val = input[((n * C + c) * H + h_in) * W + w_in];
+            max_val = fmaxf(max_val, val);
+        }
+    }
+    output[((n * C + c) * H_out + h_out) * W_out + w_out] = max_val;
+}
+
+void launch_maxpool2d(
+    const float* input, float* output,
+    int N, int C, int H, int W,
+    int H_out, int W_out,
+    int kernel_size, int stride, int padding,
+    cudaStream_t stream)
+{
+    int total = N * C * H_out * W_out;
+    int block_size = 256;
+    int grid_size = (total + block_size - 1) / block_size;
+    maxpool2d_kernel<<<grid_size, block_size, 0, stream>>>(
+        input, output, N, C, H, W, H_out, W_out, kernel_size, stride, padding);
+}
+
+// ============================================================
+// AvgPool2D (NCHW)
+// ============================================================
+
+__global__ void avgpool2d_kernel(
+    const float* __restrict__ input, float* __restrict__ output,
+    int N, int C, int H, int W,
+    int H_out, int W_out,
+    int kernel_size, int stride, int padding)
+{
+    int idx = blockIdx.x * blockDim.x + threadIdx.x;
+    int total = N * C * H_out * W_out;
+    if (idx >= total) return;
+
+    int w_out = idx % W_out;
+    int h_out = (idx / W_out) % H_out;
+    int nc = idx / (H_out * W_out);
+    int c = nc % C;
+    int n = nc / C;
+
+    int h_start = h_out * stride - padding;
+    int w_start = w_out * stride - padding;
+
+    float acc = 0.0f;
+    int count = 0;
+    for (int kh = 0; kh < kernel_size; ++kh) {
+        int h_in = h_start + kh;
+        if (h_in < 0 || h_in >= H) continue;
+        for (int kw = 0; kw < kernel_size; ++kw) {
+            int w_in = w_start + kw;
+            if (w_in < 0 || w_in >= W) continue;
+            acc += input[((n * C + c) * H + h_in) * W + w_in];
+            ++count;
+        }
+    }
+    output[((n * C + c) * H_out + h_out) * W_out + w_out] = acc / count;
+}
+
+void launch_avgpool2d(
+    const float* input, float* output,
+    int N, int C, int H, int W,
+    int H_out, int W_out,
+    int kernel_size, int stride, int padding,
+    cudaStream_t stream)
+{
+    int total = N * C * H_out * W_out;
+    int block_size = 256;
+    int grid_size = (total + block_size - 1) / block_size;
+    avgpool2d_kernel<<<grid_size, block_size, 0, stream>>>(
+        input, output, N, C, H, W, H_out, W_out, kernel_size, stride, padding);
+}
+
+// ============================================================
+// im2col (Conv2D 前置展开)
+// ============================================================
+
+__global__ void im2col_kernel(
+    const float* __restrict__ input, float* __restrict__ col,
+    int N, int C, int H, int W,
+    int H_out, int W_out,
+    int KH, int KW,
+    int stride_h, int stride_w,
+    int pad_h, int pad_w)
+{
+    int idx = blockIdx.x * blockDim.x + threadIdx.x;
+    int total_rows = N * H_out * W_out;
+    int col_len = C * KH * KW;
+    if (idx >= total_rows * col_len) return;
+
+    int col_offset = idx % col_len;
+    int row_idx = idx / col_len;
+
+    int w_out = row_idx % W_out;
+    int h_out = (row_idx / W_out) % H_out;
+    int n = row_idx / (H_out * W_out);
+
+    int kw = col_offset % KW;
+    int kh = (col_offset / KW) % KH;
+    int c = col_offset / (KH * KW);
+
+    int h_in = h_out * stride_h - pad_h + kh;
+    int w_in = w_out * stride_w - pad_w + kw;
+
+    if (h_in >= 0 && h_in < H && w_in >= 0 && w_in < W) {
+        col[idx] = input[((n * C + c) * H + h_in) * W + w_in];
+    } else {
+        col[idx] = 0.0f;
+    }
+}
+
+void launch_im2col(
+    const float* input, float* col,
+    int N, int C, int H, int W,
+    int H_out, int W_out,
+    int KH, int KW,
+    int stride, int padding,
+    cudaStream_t stream)
+{
+    int total = N * H_out * W_out * C * KH * KW;
+    int block_size = 256;
+    int grid_size = (total + block_size - 1) / block_size;
+    im2col_kernel<<<grid_size, block_size, 0, stream>>>(
+        input, col, N, C, H, W, H_out, W_out, KH, KW, stride, stride, padding, padding);
+}
+
+// ============================================================
 // WMMA FP16 Tensor Core kernels (SM 8.6+)
 // 每个 warp (32 threads) 协作计算 16x16 输出 tile
 // Block 包含多个 warp，覆盖 TILE x TILE 输出区域

@@ -36,6 +36,10 @@ from triton_kernels import (
     silu_backward as triton_silu_backward,
     mlp_first_layer_triton,
     swiglu_triton,
+    conv2d_triton,
+    maxpool2d as triton_maxpool2d,
+    avgpool2d as triton_avgpool2d,
+    softmax as triton_softmax,
 )
 from triton_kernels.precision import precision
 
@@ -85,6 +89,14 @@ _SIZE_PRESETS = {
     "large": [
         {"M": 1024, "K": 1024, "N": 1024, "elem": 1048576},
         {"M": 2048, "K": 2048, "N": 2048, "elem": 4194304},
+    ],
+    "conv": [
+        {"C_in": 3, "C_out": 16, "H": 32, "W": 32, "K": 3, "stride": 1, "pad": 1, "N": 16},
+        {"C_in": 16, "C_out": 32, "H": 16, "W": 16, "K": 3, "stride": 1, "pad": 1, "N": 16},
+    ],
+    "pool": [
+        {"C": 16, "H": 32, "W": 32, "K": 2, "stride": 2, "pad": 0, "N": 16},
+        {"C": 32, "H": 16, "W": 16, "K": 2, "stride": 2, "pad": 0, "N": 16},
     ],
 }
 
@@ -500,6 +512,166 @@ def bench_bias_add_relu(size: dict, warmup: int, iters: int) -> list[BenchResult
     return [r]
 
 
+def bench_conv2d(size: dict, warmup: int, iters: int) -> list[BenchResult]:
+    N = size["N"]
+    C_in, C_out = size["C_in"], size["C_out"]
+    H, W = size["H"], size["W"]
+    K = size["K"]
+    stride, pad = size["stride"], size["pad"]
+
+    x = torch.randn(N, C_in, H, W, device="cuda", dtype=torch.float32)
+    weight = torch.randn(C_out, C_in, K, K, device="cuda", dtype=torch.float32)
+    bias = torch.randn(C_out, device="cuda", dtype=torch.float32)
+
+    # PyTorch reference
+    conv_pt = torch.nn.Conv2d(C_in, C_out, K, stride=stride, padding=pad, bias=True).to("cuda")
+    conv_pt.weight.data.copy_(weight)
+    conv_pt.bias.data.copy_(bias)
+    ref = conv_pt(x)
+
+    # Triton
+    tr_out = conv2d_triton(x, weight, bias, stride=stride, padding=pad)
+    tr_l2, tr_max = _errors(ref, tr_out)
+    tr_med, tr_p95 = _bench(conv2d_triton, x, weight, bias, warmup=warmup, iters=iters,
+                             stride=stride, padding=pad)
+
+    pt_med, pt_p95 = _bench(conv_pt, x, warmup=warmup, iters=iters)
+
+    r = BenchResult(
+        name="conv2d", shapes=f"({N},{C_in},{H},{W})*{K}k->{C_out}ch",
+        pytorch_ms=pt_med, triton_ms=tr_med,
+        pytorch_p95_ms=pt_p95, triton_p95_ms=tr_p95,
+        triton_l2_err=tr_l2, triton_max_err=tr_max,
+        triton_speedup=pt_med / tr_med if tr_med > 0 else 0,
+    )
+
+    if _HAS_CUDA:
+        cu_out = mlp_cuda.conv2d(x, weight, bias, stride, pad)
+        cu_l2, cu_max = _errors(ref, cu_out)
+        cu_med, cu_p95 = _bench(mlp_cuda.conv2d, x, weight, bias, stride, pad,
+                                 warmup=warmup, iters=iters)
+        r.cuda_ms = cu_med
+        r.cuda_p95_ms = cu_p95
+        r.cuda_l2_err = cu_l2
+        r.cuda_max_err = cu_max
+        r.cuda_speedup = pt_med / cu_med if cu_med > 0 else 0
+
+    return [r]
+
+
+def bench_maxpool2d(size: dict, warmup: int, iters: int) -> list[BenchResult]:
+    N = size["N"]
+    C, H, W = size["C"], size["H"], size["W"]
+    K, stride, pad = size["K"], size["stride"], size["pad"]
+
+    x = torch.randn(N, C, H, W, device="cuda", dtype=torch.float32)
+
+    ref = torch.nn.functional.max_pool2d(x, K, stride=stride, padding=pad)
+
+    tr_out = triton_maxpool2d(x, K, stride=stride, padding=pad)
+    tr_l2, tr_max = _errors(ref, tr_out)
+    tr_med, tr_p95 = _bench(triton_maxpool2d, x, K, warmup=warmup, iters=iters,
+                             stride=stride, padding=pad)
+
+    pt_med, pt_p95 = _bench(
+        torch.nn.functional.max_pool2d, x, K,
+        warmup=warmup, iters=iters, stride=stride, padding=pad)
+
+    r = BenchResult(
+        name="maxpool2d", shapes=f"({N},{C},{H},{W})*{K}k",
+        pytorch_ms=pt_med, triton_ms=tr_med,
+        pytorch_p95_ms=pt_p95, triton_p95_ms=tr_p95,
+        triton_l2_err=tr_l2, triton_max_err=tr_max,
+        triton_speedup=pt_med / tr_med if tr_med > 0 else 0,
+    )
+
+    if _HAS_CUDA:
+        cu_out = mlp_cuda.maxpool2d(x, K, stride, pad)
+        cu_l2, cu_max = _errors(ref, cu_out)
+        cu_med, cu_p95 = _bench(mlp_cuda.maxpool2d, x, K, stride, pad,
+                                 warmup=warmup, iters=iters)
+        r.cuda_ms = cu_med
+        r.cuda_p95_ms = cu_p95
+        r.cuda_l2_err = cu_l2
+        r.cuda_max_err = cu_max
+        r.cuda_speedup = pt_med / cu_med if cu_med > 0 else 0
+
+    return [r]
+
+
+def bench_avgpool2d(size: dict, warmup: int, iters: int) -> list[BenchResult]:
+    N = size["N"]
+    C, H, W = size["C"], size["H"], size["W"]
+    K, stride, pad = size["K"], size["stride"], size["pad"]
+
+    x = torch.randn(N, C, H, W, device="cuda", dtype=torch.float32)
+
+    ref = torch.nn.functional.avg_pool2d(x, K, stride=stride, padding=pad)
+
+    tr_out = triton_avgpool2d(x, K, stride=stride, padding=pad)
+    tr_l2, tr_max = _errors(ref, tr_out)
+    tr_med, tr_p95 = _bench(triton_avgpool2d, x, K, warmup=warmup, iters=iters,
+                             stride=stride, padding=pad)
+
+    pt_med, pt_p95 = _bench(
+        torch.nn.functional.avg_pool2d, x, K,
+        warmup=warmup, iters=iters, stride=stride, padding=pad)
+
+    r = BenchResult(
+        name="avgpool2d", shapes=f"({N},{C},{H},{W})*{K}k",
+        pytorch_ms=pt_med, triton_ms=tr_med,
+        pytorch_p95_ms=pt_p95, triton_p95_ms=tr_p95,
+        triton_l2_err=tr_l2, triton_max_err=tr_max,
+        triton_speedup=pt_med / tr_med if tr_med > 0 else 0,
+    )
+
+    if _HAS_CUDA:
+        cu_out = mlp_cuda.avgpool2d(x, K, stride, pad)
+        cu_l2, cu_max = _errors(ref, cu_out)
+        cu_med, cu_p95 = _bench(mlp_cuda.avgpool2d, x, K, stride, pad,
+                                 warmup=warmup, iters=iters)
+        r.cuda_ms = cu_med
+        r.cuda_p95_ms = cu_p95
+        r.cuda_l2_err = cu_l2
+        r.cuda_max_err = cu_max
+        r.cuda_speedup = pt_med / cu_med if cu_med > 0 else 0
+
+    return [r]
+
+
+def bench_softmax(size: dict, warmup: int, iters: int) -> list[BenchResult]:
+    M, N = size["M"], size["N"]
+    x = torch.randn(M, N, device="cuda", dtype=torch.float32)
+
+    ref = torch.nn.functional.softmax(x, dim=1)
+
+    tr_out = triton_softmax(x)
+    tr_l2, tr_max = _errors(ref, tr_out)
+    tr_med, tr_p95 = _bench(triton_softmax, x, warmup=warmup, iters=iters)
+
+    pt_med, pt_p95 = _bench(torch.nn.functional.softmax, x, 1, warmup=warmup, iters=iters)
+
+    r = BenchResult(
+        name="softmax", shapes=f"({M},{N})",
+        pytorch_ms=pt_med, triton_ms=tr_med,
+        pytorch_p95_ms=pt_p95, triton_p95_ms=tr_p95,
+        triton_l2_err=tr_l2, triton_max_err=tr_max,
+        triton_speedup=pt_med / tr_med if tr_med > 0 else 0,
+    )
+
+    if _HAS_CUDA:
+        cu_out = mlp_cuda.softmax(x)
+        cu_l2, cu_max = _errors(ref, cu_out)
+        cu_med, cu_p95 = _bench(mlp_cuda.softmax, x, warmup=warmup, iters=iters)
+        r.cuda_ms = cu_med
+        r.cuda_p95_ms = cu_p95
+        r.cuda_l2_err = cu_l2
+        r.cuda_max_err = cu_max
+        r.cuda_speedup = pt_med / cu_med if cu_med > 0 else 0
+
+    return [r]
+
+
 # ============================================================
 # 算子注册表
 # ============================================================
@@ -517,6 +689,10 @@ OP_REGISTRY = {
     "fused_mlp_first": bench_fused_mlp_first,
     "swiglu": bench_swiglu,
     "bias_add_relu": bench_bias_add_relu,
+    "conv2d": bench_conv2d,
+    "maxpool": bench_maxpool2d,
+    "avgpool": bench_avgpool2d,
+    "softmax": bench_softmax,
 }
 
 

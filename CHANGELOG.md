@@ -1,5 +1,18 @@
 # CHANGELOG
 
+## 2026-05-30 #1 — 新增 Conv2D、MaxPool2D、AvgPool2D、Softmax 算子
+
+**内容：**
+- `triton_kernels/softmax.py`：新增 Triton softmax kernel（逐行，数值稳定）
+- `triton_kernels/pool.py`：新增 Triton MaxPool2D、AvgPool2D kernel（NCHW 格式）
+- `triton_kernels/conv.py`：新增 Triton Conv2D（im2col + matmul 分解）
+- `kernels/mlp_cuda_kernels.cu`：新增 CUDA softmax、maxpool2d、avgpool2d、im2col kernel
+- `kernels/binding.cpp`：新增 conv2d、maxpool2d、avgpool2d、softmax Python 绑定
+- `triton_kernels/__init__.py`：导出新算子
+- `benchmark_ops.py`：新增 bench_conv2d、bench_maxpool、bench_avgpool、bench_softmax
+
+**目的：** 扩展算子库，覆盖卷积、池化、softmax 等常见 CNN/Transformer 操作
+
 ## 2026-05-27 #2 — RTX 5070 Ti (Blackwell SM 12.0) 优化
 
 **内容：**
