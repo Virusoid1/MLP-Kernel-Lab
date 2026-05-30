@@ -1,5 +1,15 @@
 # CHANGELOG
 
+## 2026-05-30 #2 — 新增 Naive C++ CPU 实现（学习用）
+
+**内容：**
+- `naive/operators.cpp`：纯 C++17 实现，不依赖任何深度学习库
+- MLP 完整训练流程: Linear 前向/反向、ReLU/Sigmoid 激活、Softmax + CrossEntropy、SGD 参数更新
+- CNN 算子: Conv2D(im2col+matmul)、MaxPool2D、AvgPool2D
+- Demo: XOR 分类(4/4 accuracy)、Spiral 3-class 分类(99% accuracy)、CNN 算子验证
+
+**目的：** 作为学习材料，直观展示深度学习前向/反向传播的数学原理
+
 ## 2026-05-30 #1 — 新增 Conv2D、MaxPool2D、AvgPool2D、Softmax 算子
 
 **内容：**
