@@ -245,6 +245,26 @@ FP32 模式，模型 `[784,1024,512,256,10]`，ReLU + LayerNorm + Dropout=0.1，
 
 > 注:此小节是 1 step 微基准,**未跑 15-epoch 完整训练**,不与上表同列直接比较 GPU 差异 — 原表在不同 GPU/不同 batch 上测得。要并列对照,请用 `run_compare.py --cuda --cutile --precision fp32 --epochs 15`(同机)采一份完整数据,再填回上表。
 
+### 完整 4-backend 实测 (RTX 5070 Ti, FP32, 15 epoch, 2026-06-02)
+
+同机同 config 跑 `python run_compare.py --cuda --cutile --precision fp32 --epochs 15`,模型 `[784,1024,512,256,10]` + LayerNorm + Dropout 0.1,batch=256。完整日志 `results/four_backend_fp32.log`,benchmark JSON `results/compare_20260602_231903.json`。
+
+| 指标 | PyTorch | Triton | CUDA | cuTile |
+|------|---------|--------|------|--------|
+| best val_acc | 98.71% | 98.63% | 97.06% ⚠️ | 98.70% |
+| best at epoch | 12 | 13 | 15 | 12 |
+| 训练时间(总) | 28.5s | 50.1s | 31.3s | 36.5s |
+| 训练步延迟 (median) | 1.745 ms | 2.215 ms | **1.583 ms** | 2.944 ms |
+| 训练步延迟 (p95) | 5.989 ms | 4.392 ms | 4.423 ms | 5.337 ms |
+| 训练吞吐量 (samples/s) | 146,730 | 115,550 | **161,747** | 86,944 |
+| 推理延迟 (median) | 0.363 ms | 0.838 ms | **0.269 ms** | 0.780 ms |
+| 推理吞吐量 (samples/s) | 704,380 | 305,600 | **952,608** | 328,077 |
+
+**观察:**
+- **CUDA 精度回归 97.06%**(vs 其它 ~98.6%)远超 TF32/tanh-GELU 近似可解释的 0.05%,疑似 wmma64 `__launch_bounds__` 修复(256→512)或 `matmul_tiled_auto` 256–511 分支改 32×32 tile 后产生数值偏差。CUDA backend 算子需重跑 `tests/test_cuda_kernels.py` 定位。详见 CHANGELOG 2026-06-02 #3 与 #4。
+- **CUDA 单 step 性能最佳**(训练 1.58ms / 推理 0.27ms / 吞吐 95 万 samples/s)说明 kernel 路径走通了,只是数值不对。
+- **cuTile end-to-end 98.70% 与 PyTorch 同档**,精度无回归;单 step 比 `profiling/bench_cutile.py` 慢(2.94 vs 2.26 ms),差异来自 trainer 的 dataloader + autograd graph 开销。
+
 ## 许可证
 
 MIT

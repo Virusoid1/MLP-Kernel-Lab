@@ -1,5 +1,23 @@
 # CHANGELOG
 
+## 2026-06-02 #3 — 完整 4-backend 15-epoch 对比 (RTX 5070 Ti)
+
+**内容:**
+- 修两个 RTX 5070 Ti 上才暴露的原生 bug(拆分前后都存在,只在 max_dim ∈ [256,511] 或 wmma64 路径触发):
+  1. `matmul.cu launch_matmul_tiled_auto`: max_dim ∈ [256,511] 启动 `block(64,64)=4096 threads` 超 CUDA 1024 上限。改为 `block(32,32)=1024 threads` + 32×32 tile FP32。
+  2. `wmma.cu matmul_wmma64_{,transB,transA}_kernel`: `__launch_bounds__(256)` 声明与实际 block(16 warps × 32 = 512 threads)不一致,PTX runtime 拒绝 launch。改为 `__launch_bounds__(512)`。
+- 通过代理(127.0.0.1:7897)成功 prefetch MNIST 4 个 raw 文件(yann/S3 直连 1-15 KB/s,代理 100+ MB/s)到 `data/MNIST/raw/`。
+- 完整 4-backend × 15 epoch 跑通,结果落 `results/four_backend_fp32.log` + `results/compare_20260602_231903.json`,README "完整 4-backend 实测" 小节同步更新。
+
+**结果(15 epoch best val_acc / 训练总时长 / 训练步 median ms / 推理 median ms):**
+- PyTorch: 98.71% / 28.5s / 1.745 / 0.363
+- Triton:  98.63% / 50.1s / 2.215 / 0.838
+- CUDA:    **97.06%** ⚠️ / 31.3s / 1.583 / 0.269
+- cuTile:  98.70% / 36.5s / 2.944 / 0.780
+
+**已知问题(进入 #4 调查):**
+- CUDA backend 精度从 ~98.6% 退到 97.06%,差 1.6 个百分点,**远超 TF32/tanh-GELU 近似可解释的 0.05% 范围**。loss 也偏高(0.103 vs 其它 0.054)。说明上面 2 个 launch_bounds/tile 修复治标但伤了数值正确性,或暴露了既有数值 bug。需先跑 `tests/test_cuda_kernels.py` 定位是 wmma64、matmul_tiled 32×32 还是别的算子。
+
 ## 2026-06-02 #2 — cuTile 单 step 微基准 (RTX 5070 Ti)
 
 **内容:**
