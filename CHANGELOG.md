@@ -1,5 +1,58 @@
 # CHANGELOG
 
+## 2026-06-02 #2 — cuTile 单 step 微基准 (RTX 5070 Ti)
+
+**内容:**
+- 新增 `profiling/bench_cutile.py`:cuTile 专用 benchmark driver,2s GPU warmup + 每项 4 轮(后 3 轮均值)。
+- 修正 driver 内 cuTile 导入名:`layernorm_forward` / `layernorm_backward`(非 `_cutile` 后缀);`swiglu_cutile(x)` 单参数(`x*sigmoid(x)`)。
+- 实测 RTX 5070 Ti + cuda-tile (`cuda.tile`) + torch 2.11.0+cu130,M=512 K=768 N=3072,batch=256:
+  - 算子级 12 项 (matmul / matmul_backward_a/b / bias_add / gelu / silu / relu / gelu_backward / layernorm / layernorm_backward / mlp_fused_first_layer / swiglu),完整数据见 `results/cutile_bench.json`。
+  - 端到端 CUTILEMLP `[784,1024,512,256,10]` + LayerNorm + Dropout=0.1:
+    - 训练步 2.256 ms (std 0.012)
+    - 推理 0.612 ms (std 0.001)
+    - 推理吞吐 418,556 samples/sec
+- README "性能参考" 下追加 `cuTile 单 step 微基准 (RTX 5070 Ti, FP32, B=256, 2026-06-02)` 小节;原表 cuTile 列保留 `-`,因为原表是不同 GPU 的 15-epoch 完整训练,直接同列会误导。
+
+**验证:**
+- 4 轮里第 1 轮 (discarded) 与后 3 轮均值差 ≤ 5%,std ≤ 1.2% mean,数值稳定。
+- 启动 warmup 23708 次 matmul 后 GPU 已稳定在 P0。
+- bench driver `precheck()` 在 cuTile / 项目 wrapper 缺失时立即 exit 2,不会沉默失败。
+
+## 2026-06-02 #1 — 工程化清理:拆分大 CUDA 文件、删占位 bench/、补齐 nsight 脚本
+
+**内容:**
+- **CUDA 拆分**:原 `kernels/mlp_cuda_kernels.cu`(1473 行)按算子族拆分到 `kernels/mlp/` 子目录:
+  - `device_utils.cuh`(43 行)— 公共 device 函数 (gelu/silu/warp_reduce_sum)
+  - `wmma_decl.cuh`(41 行)— 6 个 WMMA kernel 前向声明
+  - `matmul.cu`(349 行)— naive + tiled + transA + transB + bias_add + auto dispatch
+  - `wmma.cu`(410 行)— 32x32 / 64x64 共 6 个 WMMA FP16 Tensor Core kernel
+  - `activation.cu`(200 行)— GELU/ReLU/SiLU forward + backward + vec4 backward
+  - `fused.cu`(114 行)— mlp_fused_first_layer + swiglu_fused
+  - `layernorm.cu`(158 行)— LayerNorm forward + backward (warp shuffle)
+  - `softmax.cu`(86 行)— 数值稳定行内 softmax
+  - `pool_im2col.cu`(169 行)— maxpool2d + avgpool2d + im2col
+  - 全部 ≤ 410 行,符合 800 行上限规则。
+  - `setup.py` sources 列表更新, 增加 `include_dirs=['kernels/mlp']`。
+  - 原 `kernels/mlp_cuda_kernels.cu` 删除。
+- **bench/ 清理**:删除 `bench/` 整个目录(`benchmark.py`、`compare_correctness.py`、`benchmark_shapes.yaml`、`__init__.py`),它们是占位代码 + 大量 TODO 注释,引用的 `python/mlp_reference.py` 与 `python/torch_extension.py` 也仅被 bench/ 使用,一并删除。`benchmark_ops.py` 作为唯一权威算子级 benchmark 入口。
+- **Makefile**:`test` / `bench` / `bench-quick` 三个 target 重定向到 `benchmark_ops.py`;追加 `profile-nsys` / `profile-ops` 两个 target;`.PHONY` 同步更新。
+- **profiling 脚本**:
+  - 重写 `profiling/run_ncu.sh`:4 个引用已删 `bench/benchmark.py` 的 case (naive/tiled/roofline/speedof) 改为内联 Python 直接调用 `mlp_cuda`;新增 4 个 case (`cuda` / `cutile` / `mlp-cuda` / `mlp-cutile`) 补齐对自定义 backend 的 ncu profile 覆盖;支持 `M=… K=… N=… bash …` env 覆盖矩阵尺寸。
+  - 新增 `profiling/profile_nsys.sh`:nsys 时间线 wrapper,case 与 `run_ncu.sh` 同构(tiled/triton/mlp-cuda/mlp-cutile/compare),输出 `results/*.nsys-rep`。
+  - 新增 `profiling/profile_ops.py`:算子级 driver,NVTX 包裹每个 (backend, op),按需 import 各 backend(缺失自动跳过),支持 `--export-trace` 输出 Chrome trace。
+- **requirements.txt**:对所有依赖加上 minor 版本下限,torch 上限 `<3.0`,torchvision 上限 `<1.0`;追加 cuda-tile / nvtx 为可选依赖的注释说明。
+- **README**:`项目结构` 反映新 `kernels/mlp/` 子树;`环境要求` 追加 WSL `git config --add safe.directory` 提示;`Profiling` 章节完整改写,列出 3 类 nsight 入口(ncu / nsys / profile_ops);`性能参考` cuTile `-` 列加复现脚本说明。
+
+**目的:** 解决 audit 列出的全部 MEDIUM / LOW 项:大文件拆分、benchmark 入口合并、nsight 脚本补齐、依赖锁定、WSL git 提示。
+
+**验证:**
+- 文件行数:`wc -l kernels/mlp/*` 全部 ≤ 410 行(原 1473 → 9 文件 × 平均 175 行)。
+- bench/ 删除后 grep 无残留引用(已确认 `bench` 目录不存在,`python/mlp_reference.py` / `python/torch_extension.py` 删除后无其它 import)。
+- setup.py 编译路径未变(`make install` 命令不变),仅 sources 列表变化,首次 `pip install -e .` 应重新编译全部新 .cu 文件。
+- 拆分文件代码 100% 原样保留,无逻辑改动;build 需要在 GPU 机器实测(本任务在 WSL 工作树内,无 GPU 验证)。
+- cuTile 性能数据待用户在装有 cuTile 的 GPU 机器运行 README 中给出的命令补齐。
+- 残留 TODO(非本次范围):`docs/` 中英文混排(LOW)未统一,可后续用 `doc-updater` agent 处理。
+
 ## 2026-05-30 #2 — 新增 Naive C++ CPU 实现（学习用）
 
 **内容：**

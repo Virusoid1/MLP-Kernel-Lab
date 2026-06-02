@@ -1,8 +1,18 @@
-torch>=2.0.0
-torchvision>=0.15.0
+# 必需依赖 (运行 PyTorch + Triton backend)
+torch>=2.0.0,<3.0.0
+torchvision>=0.15.0,<1.0.0
 triton>=2.0.0
-numpy
-pandas
-matplotlib
-pyyaml
-pytest
+numpy>=1.21
+pandas>=1.3
+matplotlib>=3.4
+pyyaml>=5.4
+pytest>=7.0
+
+# 可选依赖 (cuTile backend, 启用 cutile_* kernel)
+# 因 cuda-tile 未发布到 PyPI 主分发,需单独安装:
+#   pip install cuda-tile
+# 不强制要求, run_compare.py / benchmark_ops.py 在缺失时自动跳过 cuTile 路径
+
+# 可选依赖 (NVTX 标记, 用于 profiling/profile_ops.py 和 profile_pytorch.py)
+# 不安装时自动回退为 no-op:
+#   pip install nvtx

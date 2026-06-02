@@ -16,7 +16,7 @@ static cudaStream_t _get_cuda_stream(torch::Tensor t) {
     return c10::cuda::getCurrentCUDAStream(t.device().index()).stream();
 }
 
-// Forward 声明 CUDA kernel launch 函数 (定义在 mlp_cuda_kernels.cu)
+// Forward 声明 CUDA kernel launch 函数 (定义在 kernels/mlp/*.cu)
 void launch_matmul_naive(
     const float* A, const float* B, float* C,
     int M, int K, int N, cudaStream_t stream);

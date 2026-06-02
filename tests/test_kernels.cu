@@ -19,9 +19,8 @@
 #include <cuda_runtime.h>
 #include <cuda_fp16.h>
 
-// 被测函数声明（从 mlp_cuda_kernels.cu 提取的 launch 函数）
-// 这里直接 include kernel 文件中的设备函数太复杂，
-// 所以用独立的 kernel 实现来测试核心算法正确性。
+// 被测函数:本文件内联独立 kernel 实现验证核心算法正确性,
+// 不依赖 kernels/mlp/*.cu 链接(那些 launch 函数走 PyTorch extension 路径)。
 
 // ============================================================
 // 工具函数

@@ -1,4 +1,4 @@
-.PHONY: install test bench profile clean plots test-cuda test-python
+.PHONY: install test bench profile clean plots test-cuda test-python profile-nsys profile-ops
 
 # Python 测试
 test-python:
@@ -32,17 +32,17 @@ check:
 	@echo "=== Triton ==="
 	@python -c "import triton; print(f'Triton {triton.__version__}')" 2>/dev/null || echo "Triton not installed"
 
-# 测试
+# 测试 (算子级横向对比, 唯一权威 benchmark 入口)
 test:
-	python bench/compare_correctness.py --all
+	python benchmark_ops.py
 
-# benchmark
+# benchmark (算子级横向对比, 全尺寸默认配置)
 bench:
-	python bench/benchmark.py --config bench/benchmark_shapes.yaml --output results/benchmark_results.csv
+	python benchmark_ops.py --warmup 20 --iters 100
 
-# bench 快速测试
+# bench 快速测试 (小尺寸)
 bench-quick:
-	python bench/benchmark.py --config bench/benchmark_shapes.yaml
+	python benchmark_ops.py --sizes small --warmup 5 --iters 20
 
 # profiling (需要 Nsight Compute)
 profile-naive:
@@ -62,6 +62,14 @@ profile-triton-matmul:
 
 profile-compare:
 	bash profiling/run_ncu.sh compare
+
+# nsys 时间线 profiling (新增, 与 run_ncu.sh 同构)
+profile-nsys:
+	bash profiling/profile_nsys.sh tiled
+
+# 算子级 profiling driver (NVTX 包裹, 跨 backend)
+profile-ops:
+	python profiling/profile_ops.py
 
 # 生成图表
 plots:

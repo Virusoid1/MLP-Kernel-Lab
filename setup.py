@@ -8,8 +8,16 @@ setup(
             name='mlp_cuda',
             sources=[
                 'kernels/binding.cpp',
-                'kernels/mlp_cuda_kernels.cu',
+                # CUDA kernels (按算子族拆分自原 mlp_cuda_kernels.cu)
+                'kernels/mlp/matmul.cu',
+                'kernels/mlp/wmma.cu',
+                'kernels/mlp/activation.cu',
+                'kernels/mlp/fused.cu',
+                'kernels/mlp/layernorm.cu',
+                'kernels/mlp/softmax.cu',
+                'kernels/mlp/pool_im2col.cu',
             ],
+            include_dirs=['kernels/mlp'],
             extra_compile_args={
                 'cxx': ['-O3'],
                 'nvcc': [

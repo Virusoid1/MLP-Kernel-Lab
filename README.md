@@ -20,13 +20,22 @@
 MLP-Kernel-Lab/
 ├── kernels/                    # CUDA kernel 实现
 │   ├── vector_add.cu           #   CUDA 基础 & 计时
-│   ├── matmul_naive.cu         #   朴素矩阵乘法
-│   ├── matmul_tiled.cu         #   shared memory 分块矩阵乘法
-│   ├── activation.cu           #   GELU / SiLU device 函数
-│   ├── mlp_fused_first_layer.cu#   融合 matmul+bias+GELU
-│   ├── swiglu_fused.cu         #   融合 SwiGLU
-│   ├── mlp_cuda_kernels.cu     #   kernel launch 封装（含 LayerNorm）
-│   └── binding.cpp             #   PyTorch C++ extension 绑定
+│   ├── matmul_naive.cu         #   朴素矩阵乘法 (CMake standalone)
+│   ├── matmul_tiled.cu         #   shared memory 分块矩阵乘法 (CMake standalone)
+│   ├── activation.cu           #   GELU / SiLU device 函数 (CMake standalone)
+│   ├── mlp_fused_first_layer.cu#   融合 matmul+bias+GELU (CMake standalone)
+│   ├── swiglu_fused.cu         #   融合 SwiGLU (CMake standalone)
+│   ├── binding.cpp             #   PyTorch C++ extension 绑定
+│   └── mlp/                    # PyTorch extension kernel (按算子族拆分)
+│       ├── device_utils.cuh    #   公共 device 函数 (gelu/silu/warp_reduce)
+│       ├── wmma_decl.cuh       #   WMMA kernel 前向声明
+│       ├── matmul.cu           #   naive + tiled + transA + transB + bias_add
+│       ├── wmma.cu             #   WMMA FP16 Tensor Core 6 个 kernel
+│       ├── activation.cu       #   GELU/ReLU/SiLU forward + backward (+ vec4)
+│       ├── fused.cu            #   mlp_fused_first_layer + swiglu_fused
+│       ├── layernorm.cu        #   LayerNorm forward + backward (warp shuffle)
+│       ├── softmax.cu          #   逐行 softmax (数值稳定)
+│       └── pool_im2col.cu      #   MaxPool / AvgPool / im2col
 ├── triton_kernels/             # Triton kernel 实现
 │   ├── matmul.py               #   分块矩阵乘法（L2 缓存优化）
 │   ├── elementwise.py          #   BiasAdd、ReLU、GELU、SiLU、融合 BiasAdd+ReLU
@@ -82,6 +91,12 @@ MLP-Kernel-Lab/
 - Triton 2.0+
 - cuTile 1.3+（可选，`pip install cuda-tile`）
 
+> **WSL 用户注意**：仓库放在 `\\wsl.localhost\Ubuntu\...` 下时，Windows 端 git 会报 `dubious ownership`。在 Windows shell 执行一次：
+>
+> ```bash
+> git config --global --add safe.directory '%(prefix)///wsl.localhost/Ubuntu/home/<user>/projects/MLP-Kernel-Lab'
+> ```
+
 ### 安装
 
 ```bash
@@ -133,10 +148,31 @@ make test-cuda         # C++ CUDA 测试（6 项）
 
 ### Profiling
 
+仓库提供 3 个互补 nsight 入口（详见 `profiling/README.md`）：
+
 ```bash
-bash profiling/run_ncu.sh triton          # Nsight 分析 Triton
-bash profiling/run_ncu.sh compare         # torch.profiler 对比
+# 1. ncu (kernel 级 micro-arch 指标)
+bash profiling/run_ncu.sh tiled              # CUDA tiled matmul auto-dispatch
+bash profiling/run_ncu.sh cuda               # CUDA matmul + LayerNorm + activation
+bash profiling/run_ncu.sh cutile             # cuTile matmul (需 cuda-tile)
+bash profiling/run_ncu.sh mlp-cuda           # CUDAMLP 端到端 1 step
+bash profiling/run_ncu.sh mlp-cutile         # CUTILEMLP 端到端 1 step
+bash profiling/run_ncu.sh triton             # Triton MLP 1 step
+bash profiling/run_ncu.sh compare            # PyTorch vs Triton torch.profiler
+
+# 2. nsys (时间线 / NVTX 折叠 / 跨 step)
+bash profiling/profile_nsys.sh tiled         # 单 kernel 重复 timeline
+bash profiling/profile_nsys.sh mlp-cuda      # CUDAMLP 5 step timeline
+bash profiling/profile_nsys.sh compare       # PyTorch vs Triton vs CUDA
+
+# 3. 算子级 driver (NVTX 包裹, 任意维度, 跨 backend)
+python profiling/profile_ops.py                          # 全 backend 全算子
+python profiling/profile_ops.py --backend cuda triton    # 仅指定 backend
+python profiling/profile_ops.py --ops matmul --M 2048 --K 2048 --N 2048
+nsys profile -t cuda,nvtx -o results/nsys_ops python profiling/profile_ops.py
 ```
+
+Makefile 短路:`make profile-tiled` / `make profile-nsys` / `make profile-ops` / `make profile-compare`。
 
 ## 实现状态
 
@@ -171,6 +207,43 @@ FP32 模式，模型 `[784,1024,512,256,10]`，ReLU + LayerNorm + Dropout=0.1，
 | 训练步延迟 | 3.30ms | 12.35ms | 8.85ms | - |
 | 推理延迟 | 1.46ms | 2.13ms | **1.20ms** | - |
 | 推理吞吐量 | 174.8K | 119.7K | **213.2K** | - |
+
+> cuTile 列 `-` 表示尚未采集数据(需 cuTile 1.3+ 安装)。复现命令:
+>
+> ```bash
+> pip install cuda-tile
+> python run_compare.py --cuda --cutile --precision fp32 --epochs 15 \
+>     | tee results/four_backend_fp32.txt
+> ```
+>
+> 完成后将结果填入上表(参考 CHANGELOG 2026-05-27 #1 测得的正确性数据,只缺端到端延迟)。
+
+### cuTile 单 step 微基准 (RTX 5070 Ti, FP32, B=256, 2026-06-02)
+
+`python profiling/bench_cutile.py` 实测,每项 4 轮取后 3 轮均值(详见 `results/cutile_bench.json`):
+
+| 算子 | mean ms | std |
+|------|---------|-----|
+| matmul (512×768·768×3072) | 1.091 | 0.001 |
+| matmul_backward_a (dA = dC@B^T) | 1.375 | 0.001 |
+| matmul_backward_b (dB = A^T@dC) | 2.033 | 0.003 |
+| bias_add (512×3072) | 0.011 | 0.001 |
+| gelu / silu / relu | 0.009–0.015 | — |
+| gelu_backward | 0.010 | 0.000 |
+| layernorm forward | 0.020 | 0.000 |
+| layernorm backward | 0.259 | 0.001 |
+| mlp_fused_first_layer (matmul+bias+GELU) | 1.069 | 0.001 |
+| swiglu | 0.010 | 0.003 |
+
+端到端 CUTILEMLP `[784,1024,512,256,10]` + LayerNorm + Dropout 0.1,batch=256:
+
+| 指标 | cuTile (RTX 5070 Ti, 单 step) |
+|------|----|
+| 训练步延迟 | **2.256 ms** |
+| 推理延迟 | **0.612 ms** |
+| 推理吞吐量 | **418,556 samples/sec** |
+
+> 注:此小节是 1 step 微基准,**未跑 15-epoch 完整训练**,不与上表同列直接比较 GPU 差异 — 原表在不同 GPU/不同 batch 上测得。要并列对照,请用 `run_compare.py --cuda --cutile --precision fp32 --epochs 15`(同机)采一份完整数据,再填回上表。
 
 ## 许可证
 

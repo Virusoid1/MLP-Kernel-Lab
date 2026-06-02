@@ -497,7 +497,12 @@ setup(
     ext_modules=[
         CUDAExtension(
             name='mlp_cuda',
-            sources=['kernels/binding.cpp', 'kernels/mlp_cuda_kernels.cu'],
+            sources=['kernels/binding.cpp',
+                     'kernels/mlp/matmul.cu', 'kernels/mlp/wmma.cu',
+                     'kernels/mlp/activation.cu', 'kernels/mlp/fused.cu',
+                     'kernels/mlp/layernorm.cu', 'kernels/mlp/softmax.cu',
+                     'kernels/mlp/pool_im2col.cu'],
+            include_dirs=['kernels/mlp'],
             extra_compile_args={
                 'cxx': ['-O3'],
                 'nvcc': ['-O3', '--use_fast_math',

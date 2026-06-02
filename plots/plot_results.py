@@ -128,7 +128,7 @@ def main():
     csv_path = Path(args.csv)
     if not csv_path.exists():
         print(f"Benchmark CSV not found: {csv_path}")
-        print("Run 'python bench/benchmark.py' first.")
+        print("Run 'python benchmark_ops.py' first.")
         print("Generating demo plot with sample data structure...")
         return
 
