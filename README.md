@@ -247,23 +247,25 @@ FP32 模式，模型 `[784,1024,512,256,10]`，ReLU + LayerNorm + Dropout=0.1，
 
 ### 完整 4-backend 实测 (RTX 5070 Ti, FP32, 15 epoch, 2026-06-02)
 
-同机同 config 跑 `python run_compare.py --cuda --cutile --precision fp32 --epochs 15`,模型 `[784,1024,512,256,10]` + LayerNorm + Dropout 0.1,batch=256。完整日志 `results/four_backend_fp32.log`,benchmark JSON `results/compare_20260602_231903.json`。
+同机同 config 跑 `python run_compare.py --cuda --cutile --precision fp32 --epochs 15`,模型 `[784,1024,512,256,10]` + LayerNorm + Dropout 0.1,batch=256。完整日志 `results/four_backend_fp32_v2.log`,benchmark JSON `results/compare_20260602_235625.json`。
 
 | 指标 | PyTorch | Triton | CUDA | cuTile |
 |------|---------|--------|------|--------|
-| best val_acc | 98.71% | 98.63% | 97.06% ⚠️ | 98.70% |
-| best at epoch | 12 | 13 | 15 | 12 |
-| 训练时间(总) | 28.5s | 50.1s | 31.3s | 36.5s |
-| 训练步延迟 (median) | 1.745 ms | 2.215 ms | **1.583 ms** | 2.944 ms |
-| 训练步延迟 (p95) | 5.989 ms | 4.392 ms | 4.423 ms | 5.337 ms |
-| 训练吞吐量 (samples/s) | 146,730 | 115,550 | **161,747** | 86,944 |
-| 推理延迟 (median) | 0.363 ms | 0.838 ms | **0.269 ms** | 0.780 ms |
-| 推理吞吐量 (samples/s) | 704,380 | 305,600 | **952,608** | 328,077 |
+| best val_acc | 98.71% | 98.62% | 98.65% | 98.52% |
+| best at epoch | 12 | 15 | 15 | 14 |
+| 训练时间(总) | 27.4s | 45.0s | **27.0s** | 30.4s |
+| 训练步延迟 (median) | **1.500 ms** | 2.083 ms | 1.719 ms | 2.616 ms |
+| 训练步延迟 (p95) | 3.522 ms | 5.517 ms | 4.594 ms | 6.047 ms |
+| 训练吞吐量 (samples/s) | **170,698** | 122,889 | 148,936 | 97,845 |
+| 推理延迟 (median) | 0.340 ms | 0.649 ms | **0.298 ms** | 0.711 ms |
+| 推理吞吐量 (samples/s) | 753,331 | 394,487 | **858,139** | 360,044 |
 
 **观察:**
-- **CUDA 精度回归 97.06%**(vs 其它 ~98.6%)远超 TF32/tanh-GELU 近似可解释的 0.05%,疑似 wmma64 `__launch_bounds__` 修复(256→512)或 `matmul_tiled_auto` 256–511 分支改 32×32 tile 后产生数值偏差。CUDA backend 算子需重跑 `tests/test_cuda_kernels.py` 定位。详见 CHANGELOG 2026-06-02 #3 与 #4。
-- **CUDA 单 step 性能最佳**(训练 1.58ms / 推理 0.27ms / 吞吐 95 万 samples/s)说明 kernel 路径走通了,只是数值不对。
-- **cuTile end-to-end 98.70% 与 PyTorch 同档**,精度无回归;单 step 比 `profiling/bench_cutile.py` 慢(2.94 vs 2.26 ms),差异来自 trainer 的 dataloader + autograd graph 开销。
+- 4 后端精度差 ≤ 0.19pp,全部在 FP16 WMMA + TF32 + tanh-GELU 近似的合理噪声范围内。
+- **CUDA backend**: 训练总时长最短(27.0s),推理延迟最低(0.298 ms / 858K samples/s)。WMMA64 FP16 Tensor Core 路径修复后启用,L0 / L1 大 matmul 在 64×64 tile 上提速。
+- **PyTorch baseline (cuBLAS)**: 训练 step 最快(1.500ms),依赖高度优化的 cuBLAS GEMM。
+- **Triton / cuTile**: 训练步比 PyTorch 慢 39–74%,主要来自 autotune cache miss + autograd graph 开销;推理路径同样差距(0.65–0.71ms vs 0.30–0.34ms)。
+- **cuTile bench_cutile.py 单 step 0.61ms** 与此处端到端 0.71ms 一致(差距来自 dataloader + autograd 包装)。
 
 ## 许可证
 

@@ -1,5 +1,29 @@
 # CHANGELOG
 
+## 2026-06-03 #1 — 修 wmma64 数值 bug,CUDA 精度回归彻底解决
+
+**内容:**
+- 定位 #3 提出的 CUDA backend 精度回归 (97.06% vs 期望 98.6%) 真因:
+  - pytest 全部 16 项通过,说明单算子在测试尺寸下正确;
+  - 直接对比 `matmul_tiled_auto` 与 `torch.matmul` 在 MNIST 4 个 layer 尺寸:
+    - M=8 K=784 N=1024 (max_dim=1024 → wmma64): **max_err 83.22**
+    - M=8 K=1024 N=512 (max_dim=1024 → wmma64): **max_err 87.60**
+    - M=8 K=512 N=256 (max_dim=512 → wmma32): max_err 2.6e-02 ✓
+    - M=8 K=256 N=10 (max_dim=256 → tiled FP32): max_err 1.5e-05 ✓
+  - 结论:**只有 wmma64 (64×64 tile, R=32) 路径错**,wmma32 / FP32 路径正确。
+- 真因:wmma64 kernel `R=32` 但 `mma_sync` 只调一次(单 16x16x16 fragment),**漏掉 K 方向后 16 个元素的乘加**。wmma32 因 R=16 == fragment K 维 16 所以正好对齐没事。
+- 修复:`kernels/mlp/wmma.cu` 中 3 个 wmma64 kernel(normal / transB / transA)的 mma 段改为 K-direction `for (int kk = 0; kk < R; kk += 16)` 循环 + 2 次 fragment load + 2 次 mma_sync 累加。
+
+**验证:**
+- 修复后 4 个 MLP 形状的 matmul max_err 全部 ≤ 3.5e-02(纯 FP16 精度噪声),与 wmma32 同档。
+- 重跑 15-epoch 4-backend 完整对比:CUDA 98.65%(↑ 1.59pp from 97.06%),与 PyTorch 98.71% / Triton 98.62% / cuTile 98.52% 同档。
+- CUDA backend 此次拿到训练总时长第一(27.0s)+ 推理延迟第一(0.298 ms / 858K samples/s)。
+- 详细结果见 `results/four_backend_fp32_v2.log` 与 `results/compare_20260602_235625.json`,README "完整 4-backend 实测" 小节同步更新。
+
+**影响范围:**
+- 此 bug 在原 `kernels/mlp_cuda_kernels.cu` 中就存在,拆分时按行 100% 保留语义,所以拆分本身未引入。
+- 之前 RTX 3070 Laptop CHANGELOG 2026-05-27 #2 验证 "Ampere 无回归",但 wmma64 是 SM 8.0+ 的 64x64 tile 实现,在 3070 上 max_dim 是否真触发了 wmma64 path 未深查;5070 Ti 上 #3 修了 launch_bounds 后才正式可 launch,这条 bug 立刻浮现。
+
 ## 2026-06-02 #3 — 完整 4-backend 15-epoch 对比 (RTX 5070 Ti)
 
 **内容:**

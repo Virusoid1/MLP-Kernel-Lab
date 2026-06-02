@@ -263,11 +263,14 @@ void matmul_wmma64_kernel(
 
         __syncthreads();
 
-        nvcuda::wmma::fragment<nvcuda::wmma::matrix_a, 16, 16, 16, half, nvcuda::wmma::row_major> a_frag;
-        nvcuda::wmma::fragment<nvcuda::wmma::matrix_b, 16, 16, 16, half, nvcuda::wmma::row_major> b_frag;
-        nvcuda::wmma::load_matrix_sync(a_frag, &sA[warp_row][0], R);
-        nvcuda::wmma::load_matrix_sync(b_frag, &sB[0][warp_col], TILE);
-        nvcuda::wmma::mma_sync(acc, a_frag, b_frag, acc);
+        // FIX: R=32 但 wmma fragment 只算 16 K 维,需 R/16=2 次累加
+        for (int kk = 0; kk < R; kk += 16) {
+            nvcuda::wmma::fragment<nvcuda::wmma::matrix_a, 16, 16, 16, half, nvcuda::wmma::row_major> a_frag;
+            nvcuda::wmma::fragment<nvcuda::wmma::matrix_b, 16, 16, 16, half, nvcuda::wmma::row_major> b_frag;
+            nvcuda::wmma::load_matrix_sync(a_frag, &sA[warp_row][kk], R);
+            nvcuda::wmma::load_matrix_sync(b_frag, &sB[kk][warp_col], TILE);
+            nvcuda::wmma::mma_sync(acc, a_frag, b_frag, acc);
+        }
 
         __syncthreads();
     }
@@ -326,11 +329,14 @@ void matmul_wmma64_transB_kernel(
 
         __syncthreads();
 
-        nvcuda::wmma::fragment<nvcuda::wmma::matrix_a, 16, 16, 16, half, nvcuda::wmma::row_major> a_frag;
-        nvcuda::wmma::fragment<nvcuda::wmma::matrix_b, 16, 16, 16, half, nvcuda::wmma::row_major> b_frag;
-        nvcuda::wmma::load_matrix_sync(a_frag, &sA[warp_row][0], R);
-        nvcuda::wmma::load_matrix_sync(b_frag, &sBT[0][warp_col], TILE);
-        nvcuda::wmma::mma_sync(acc, a_frag, b_frag, acc);
+        // FIX: R=32 但 wmma fragment 只算 16 K 维,需 R/16=2 次累加
+        for (int kk = 0; kk < R; kk += 16) {
+            nvcuda::wmma::fragment<nvcuda::wmma::matrix_a, 16, 16, 16, half, nvcuda::wmma::row_major> a_frag;
+            nvcuda::wmma::fragment<nvcuda::wmma::matrix_b, 16, 16, 16, half, nvcuda::wmma::row_major> b_frag;
+            nvcuda::wmma::load_matrix_sync(a_frag, &sA[warp_row][kk], R);
+            nvcuda::wmma::load_matrix_sync(b_frag, &sBT[kk][warp_col], TILE);
+            nvcuda::wmma::mma_sync(acc, a_frag, b_frag, acc);
+        }
 
         __syncthreads();
     }
@@ -389,11 +395,14 @@ void matmul_wmma64_transA_kernel(
 
         __syncthreads();
 
-        nvcuda::wmma::fragment<nvcuda::wmma::matrix_a, 16, 16, 16, half, nvcuda::wmma::row_major> a_frag;
-        nvcuda::wmma::fragment<nvcuda::wmma::matrix_b, 16, 16, 16, half, nvcuda::wmma::row_major> b_frag;
-        nvcuda::wmma::load_matrix_sync(a_frag, &sAT[warp_row][0], R);
-        nvcuda::wmma::load_matrix_sync(b_frag, &sB[0][warp_col], TILE);
-        nvcuda::wmma::mma_sync(acc, a_frag, b_frag, acc);
+        // FIX: R=32 但 wmma fragment 只算 16 K 维,需 R/16=2 次累加
+        for (int kk = 0; kk < R; kk += 16) {
+            nvcuda::wmma::fragment<nvcuda::wmma::matrix_a, 16, 16, 16, half, nvcuda::wmma::row_major> a_frag;
+            nvcuda::wmma::fragment<nvcuda::wmma::matrix_b, 16, 16, 16, half, nvcuda::wmma::row_major> b_frag;
+            nvcuda::wmma::load_matrix_sync(a_frag, &sAT[warp_row][kk], R);
+            nvcuda::wmma::load_matrix_sync(b_frag, &sB[kk][warp_col], TILE);
+            nvcuda::wmma::mma_sync(acc, a_frag, b_frag, acc);
+        }
 
         __syncthreads();
     }
