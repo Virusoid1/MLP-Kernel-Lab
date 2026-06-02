@@ -460,3 +460,101 @@ mean_val = ct.sum(mean_acc, axis=1, keepdims=True) / N
 3. **融合 kernel 是最有价值的优化方向**：减少显存带宽瓶颈
 4. **推理路径优化效果显著**：跳过 autograd 封装，CUDA 推理延迟降至 PyTorch 的 0.82x
 5. **精度对齐是公平对比的前提**：统一 TF32/FP32 后，精度差异从 1%+ 降到 0.04%
+
+---
+
+## Decision Tree / Playbook
+
+把"何时选哪个 backend / kernel"压缩成一棵决策树,避免每次直觉摇号。
+按场景从上至下匹配:
+
+| 场景 | 推荐 backend | 备注 |
+|------|--------------|------|
+| shape 是 MNIST-class MLP weight,dtype=fp32,大 batch | `matmul_wmma64` (auto dispatch) > Triton autotune > torch.matmul | WMMA64 实测推理延迟 0.30ms,显著领先 |
+| K 不能被 32 整除 | cuTile(Python 端切 K)或 Triton(autotune 自适应) | WMMA64 要求 K 对齐 16 |
+| dtype=fp16 / bf16 | Triton > cuTile > torch autocast | 仓库 WMMA fp16 路径未完成 |
+| batch B ≥ 4096 forward | cuTile(Python loop tile + 少 L2 压力)| ct.mma 单 thread block 容量饱和 |
+| 需要 LayerNorm 融合到 GEMM | 新写专用 fused kernel(参考 `mlp_fused_first_layer`)| cuTile 是 per-op,不便融合 |
+| 单算子推理延迟优先 | CUDA(若已修好 WMMA64 K-loop) | LayerNorm 与 GEMM 之间无融合机会 |
+| 训练步整体延迟优先 | PyTorch cuBLAS | 4-backend 实测仍最快(2026-06-03) |
+| 在 MLP_LAYERS 上观察到 correctness drift | `python tools/analyze_bench.py BASELINE CAND --shape MLP_LAYERS --warn-l2 1e-3` | 锁定到具体 (op,shape) |
+
+> 这棵树的输入是"约束(shape+dtype+目标)",输出是"先试哪个 backend"。
+> 任何选择前后必须经过 `make gate` 验证;若 gate fail,立刻回退或修。
+
+---
+
+## cuTile 优化指南
+
+cuTile (Python `cuda.tile` API) 与 CUDA / Triton 的区别:
+
+| 维度 | cuTile | CUDA | Triton |
+|------|--------|------|--------|
+| Tile 描述 | Python `ct.Tile` 对象 | C++ 模板参数 | Triton `tl.constexpr` |
+| K 维循环 | Python 端(host) | kernel 内 for-loop | Triton 自动 |
+| Reduction | `ct.sum` + `ct.atomic_add` | warp shuffle + shared | `tl.sum` |
+| TMA 用法 | `ct.load`/`ct.store` 隐式 TMA | 手动 cp.async | Triton 自动 |
+| 编译时间 | 首次 ~3-8s | 一次性 nvcc | 首次 + autotune cache |
+| 适用尺寸 | 中等 (256-4096) | 全尺寸 | 全尺寸 |
+
+**Tile shape 选择**:
+- 输出 tile 大小通常等于 `get_arch_params()["cutile_mma_tile"]`(SM_120=64×64,SM_86=32×32)
+- K 维步长用 `cutile_mma_tile_k`(SM_120=32);较小 K 时 Python 端循环切片
+- elementwise:用 `cutile_elementwise_tile` (默认 4096);超大时 Python 切
+
+**Python 循环 vs kernel 循环**:
+- Python 循环(host 端) → 灵活,容易调试,kernel launch 多
+- Kernel 循环(device 端) → 启动开销小,但要 unroll 控制 register
+
+实测对比(RTX 5070 Ti, M=512 K=768 N=3072):
+- cuTile matmul: 1.09 ms ≈ CUDA WMMA32 1.10 ms,Triton autotune 1.6-2.1 ms
+
+**如何读 `results/cutile_bench.json`**:
+- 顶层 `metadata`: GPU/torch/git_sha 等
+- `ops.<op_name>`: 单算子 4 轮取后 3 均值
+- `mlp.mlp_train_step` / `mlp_infer_step`: 端到端 1 step
+- `discarded`: 第 1 轮丢弃(因 lazy compile / autotune)
+
+---
+
+## torch.compile / fp16 / bf16 recipes
+
+### `torch.compile`
+
+```python
+import torch
+torch.set_float32_matmul_precision("high")  # 启用 TF32 + bf16 自动转换
+model = MLP(config).cuda()
+model = torch.compile(model, mode="reduce-overhead")  # 适合训练 step
+```
+
+适用条件:
+- 模型结构稳定(无 dynamic control flow)
+- 训练步 ≥ 200 次(摊销 compile 开销)
+- 不与自定义 `torch.autograd.Function` 混用(Triton/CUDA backend 不兼容)
+
+### Mixed Precision (autocast + GradScaler)
+
+```python
+from torch.amp import autocast, GradScaler
+scaler = GradScaler()
+with autocast(device_type="cuda", dtype=torch.bfloat16):
+    logits = model(x)
+    loss = criterion(logits, y)
+scaler.scale(loss).backward()
+scaler.step(optimizer); scaler.update()
+```
+
+注意:
+- `bf16` 在 SM_80+ (Ampere/Blackwell) 上推荐(更宽 dynamic range);`fp16` 上易溢出需 GradScaler
+- WMMA fp16 路径在本仓库未实现,autocast + 自定义 kernel 会 fall back 到 fp32
+
+### Numerical Verification After AMP
+
+```python
+fp32_out = model(x.float())
+bf16_out = autocast_model(x)
+torch.testing.assert_close(fp32_out, bf16_out, atol=1e-2, rtol=1e-2)
+```
+
+工具:`python tools/analyze_bench.py BASELINE CAND --metric tflops --warn-l2 1e-2` 可一次性看 perf + numerics 双指标。

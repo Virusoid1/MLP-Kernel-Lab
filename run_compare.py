@@ -28,7 +28,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 from python.mnist.model import MLP, MLPConfig
 from python.mnist.triton_model import TritonMLP
 from python.mnist.trainer import Trainer, create_mnist_loaders
-from python.mnist.benchmark import benchmark_training, benchmark_inference
+from python.mnist.benchmark import benchmark_training, benchmark_inference, capture_metadata
 from triton_kernels.precision import precision
 
 try:
@@ -362,6 +362,7 @@ def main():
     t_best = max(tr_history, key=lambda m: m["val_acc"]) if tr_history else {}
 
     result = {
+        "metadata": capture_metadata(args),
         "config": config,
         "pytorch": {
             "training_history": pt_history,

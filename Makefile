@@ -1,4 +1,4 @@
-.PHONY: install test bench profile clean plots test-cuda test-python profile-nsys profile-ops
+.PHONY: install test bench profile clean plots test-cuda test-python profile-nsys profile-ops bench-op bench-cu analyze gate
 
 # Python 测试
 test-python:
@@ -70,6 +70,35 @@ profile-nsys:
 # 算子级 profiling driver (NVTX 包裹, 跨 backend)
 profile-ops:
 	python profiling/profile_ops.py
+
+# ============================================================
+# 测量-分析-优化 闭环 (Phase 1-3 of plan)
+# ============================================================
+TS := $(shell date +%Y%m%d_%H%M%S)
+BASELINE ?= results/baseline.json
+LATEST   ?= $(shell ls -t results/op_bench_*.json 2>/dev/null | head -1)
+
+# Phase 1 Measure: 跑算子级 bench (dtype sweep + roofline + metadata)
+bench-op:
+	python benchmark_ops.py --dtypes fp32,fp16,bf16 --roofline \
+	    --output results/op_bench_$(TS).json
+
+# Phase 1 Measure: cuTile 专用 bench (4 轮取后 3 + warmup)
+bench-cu:
+	python profiling/bench_cutile.py $(ARGS)
+
+# Phase 2 Analyze: 跟 baseline 对比, 默认只看 MLP_LAYERS shape
+analyze:
+	@if [ -z "$(LATEST)" ]; then echo "No candidate JSON found. Run 'make bench-op' first."; exit 1; fi
+	@if [ ! -f "$(BASELINE)" ]; then echo "No baseline at $(BASELINE). First-time setup: cp $(LATEST) $(BASELINE)"; exit 1; fi
+	python tools/analyze_bench.py $(BASELINE) $(LATEST) --shape MLP_LAYERS
+
+# 完整闭环 gate: bench + analyze --gate (perf regress or correctness fail -> exit 1)
+gate:
+	$(MAKE) bench-op
+	@LATEST=$$(ls -t results/op_bench_*.json | head -1); \
+	if [ ! -f "$(BASELINE)" ]; then echo "Promoting first run to baseline: $$LATEST"; cp $$LATEST $(BASELINE); fi; \
+	python tools/analyze_bench.py $(BASELINE) $$LATEST --shape MLP_LAYERS --gate
 
 # 生成图表
 plots:

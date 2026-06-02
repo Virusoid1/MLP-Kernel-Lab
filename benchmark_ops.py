@@ -42,6 +42,8 @@ from triton_kernels import (
     softmax as triton_softmax,
 )
 from triton_kernels.precision import precision
+from python.mnist.benchmark import capture_metadata, p95
+from python.mnist.stats import stable_median  # noqa: F401  (exported for future use)
 
 try:
     import mlp_cuda
@@ -49,6 +51,17 @@ try:
 except ImportError:
     mlp_cuda = None
     _HAS_CUDA = False
+
+try:
+    import cutile_kernels  # noqa: F401
+    _HAS_CUTILE = True
+except ImportError:
+    cutile_kernels = None  # type: ignore
+    _HAS_CUTILE = False
+
+# 全局 dtype:由 main 的 dtype sweep 设置,bench_* 函数读取
+_CURRENT_DTYPE = torch.float32
+_DTYPE_NAMES = {torch.float32: "fp32", torch.float16: "fp16", torch.bfloat16: "bf16"}
 
 
 # ============================================================
@@ -59,18 +72,33 @@ except ImportError:
 class BenchResult:
     name: str
     shapes: str
+    dtype: str = "fp32"
     pytorch_ms: float = 0.0
     triton_ms: float = 0.0
     cuda_ms: float = 0.0
+    cutile_ms: float = 0.0
     pytorch_p95_ms: float = 0.0
     triton_p95_ms: float = 0.0
     cuda_p95_ms: float = 0.0
+    cutile_p95_ms: float = 0.0
     triton_l2_err: float = 0.0
     triton_max_err: float = 0.0
     cuda_l2_err: float = 0.0
     cuda_max_err: float = 0.0
+    cutile_l2_err: float = 0.0
+    cutile_max_err: float = 0.0
     triton_speedup: float = 0.0
     cuda_speedup: float = 0.0
+    cutile_speedup: float = 0.0
+    # roofline 指标 (--roofline 启用时填充, 否则 0)
+    flops: int = 0
+    bytes_io: int = 0
+    pytorch_tflops: float = 0.0
+    triton_tflops: float = 0.0
+    cuda_tflops: float = 0.0
+    pytorch_gbps: float = 0.0
+    triton_gbps: float = 0.0
+    cuda_gbps: float = 0.0
 
 
 # ============================================================
@@ -141,8 +169,8 @@ def _errors(ref: torch.Tensor, test: torch.Tensor):
 
 def bench_matmul(size: dict, warmup: int, iters: int) -> list[BenchResult]:
     M, K, N = size["M"], size["K"], size["N"]
-    A = torch.randn(M, K, device="cuda", dtype=torch.float32)
-    B = torch.randn(K, N, device="cuda", dtype=torch.float32)
+    A = torch.randn(M, K, device="cuda", dtype=_CURRENT_DTYPE)
+    B = torch.randn(K, N, device="cuda", dtype=_CURRENT_DTYPE)
 
     ref = torch.matmul(A, B)
 
@@ -178,7 +206,7 @@ def bench_matmul(size: dict, warmup: int, iters: int) -> list[BenchResult]:
 def _bench_activation(name: str, size: dict, warmup: int, iters: int,
                       pt_fn, tr_fn, cu_fn_name: str) -> BenchResult:
     n = size["elem"]
-    x = torch.randn(n, device="cuda", dtype=torch.float32)
+    x = torch.randn(n, device="cuda", dtype=_CURRENT_DTYPE)
 
     ref = pt_fn(x)
 
@@ -234,8 +262,8 @@ def bench_silu(size: dict, warmup: int, iters: int) -> list[BenchResult]:
 def _bench_act_backward(name: str, size: dict, warmup: int, iters: int,
                         pt_fn, tr_fn, cu_fn_name: str) -> BenchResult:
     n = size["elem"]
-    x = torch.randn(n, device="cuda", dtype=torch.float32, requires_grad=True)
-    grad = torch.randn(n, device="cuda", dtype=torch.float32)
+    x = torch.randn(n, device="cuda", dtype=_CURRENT_DTYPE, requires_grad=True)
+    grad = torch.randn(n, device="cuda", dtype=_CURRENT_DTYPE)
 
     # PyTorch autograd 参考
     y = pt_fn(x)
@@ -299,8 +327,8 @@ def bench_silu_backward(size: dict, warmup: int, iters: int) -> list[BenchResult
 
 def bench_bias_add(size: dict, warmup: int, iters: int) -> list[BenchResult]:
     M, N = size["M"], size["N"]
-    x = torch.randn(M, N, device="cuda", dtype=torch.float32)
-    bias = torch.randn(N, device="cuda", dtype=torch.float32)
+    x = torch.randn(M, N, device="cuda", dtype=_CURRENT_DTYPE)
+    bias = torch.randn(N, device="cuda", dtype=_CURRENT_DTYPE)
 
     ref = x + bias
 
@@ -333,9 +361,9 @@ def bench_bias_add(size: dict, warmup: int, iters: int) -> list[BenchResult]:
 
 def bench_matmul_backward(size: dict, warmup: int, iters: int) -> list[BenchResult]:
     M, K, N = size["M"], size["K"], size["N"]
-    A = torch.randn(M, K, device="cuda", dtype=torch.float32, requires_grad=True)
-    B = torch.randn(K, N, device="cuda", dtype=torch.float32, requires_grad=True)
-    dC = torch.randn(M, N, device="cuda", dtype=torch.float32)
+    A = torch.randn(M, K, device="cuda", dtype=_CURRENT_DTYPE, requires_grad=True)
+    B = torch.randn(K, N, device="cuda", dtype=_CURRENT_DTYPE, requires_grad=True)
+    dC = torch.randn(M, N, device="cuda", dtype=_CURRENT_DTYPE)
 
     # PyTorch 参考
     C = torch.matmul(A, B)
@@ -412,9 +440,9 @@ def bench_matmul_backward(size: dict, warmup: int, iters: int) -> list[BenchResu
 
 def bench_fused_mlp_first(size: dict, warmup: int, iters: int) -> list[BenchResult]:
     M, K, N = size["M"], size["K"], size["N"]
-    X = torch.randn(M, K, device="cuda", dtype=torch.float32)
-    W = torch.randn(K, N, device="cuda", dtype=torch.float32)
-    bias = torch.randn(N, device="cuda", dtype=torch.float32)
+    X = torch.randn(M, K, device="cuda", dtype=_CURRENT_DTYPE)
+    W = torch.randn(K, N, device="cuda", dtype=_CURRENT_DTYPE)
+    bias = torch.randn(N, device="cuda", dtype=_CURRENT_DTYPE)
 
     # PyTorch reference: matmul + bias + GELU
     ref = torch.nn.functional.gelu(torch.matmul(X, W) + bias, approximate="tanh")
@@ -453,8 +481,8 @@ def bench_fused_mlp_first(size: dict, warmup: int, iters: int) -> list[BenchResu
 
 def bench_swiglu(size: dict, warmup: int, iters: int) -> list[BenchResult]:
     n = size["elem"]
-    gate = torch.randn(n, device="cuda", dtype=torch.float32)
-    up = torch.randn(n, device="cuda", dtype=torch.float32)
+    gate = torch.randn(n, device="cuda", dtype=_CURRENT_DTYPE)
+    up = torch.randn(n, device="cuda", dtype=_CURRENT_DTYPE)
 
     ref = torch.nn.functional.silu(gate) * up
 
@@ -490,8 +518,8 @@ def bench_swiglu(size: dict, warmup: int, iters: int) -> list[BenchResult]:
 
 def bench_bias_add_relu(size: dict, warmup: int, iters: int) -> list[BenchResult]:
     M, N = size["M"], size["N"]
-    x = torch.randn(M, N, device="cuda", dtype=torch.float32)
-    bias = torch.randn(N, device="cuda", dtype=torch.float32)
+    x = torch.randn(M, N, device="cuda", dtype=_CURRENT_DTYPE)
+    bias = torch.randn(N, device="cuda", dtype=_CURRENT_DTYPE)
 
     ref = torch.relu(x + bias)
 
@@ -519,9 +547,9 @@ def bench_conv2d(size: dict, warmup: int, iters: int) -> list[BenchResult]:
     K = size["K"]
     stride, pad = size["stride"], size["pad"]
 
-    x = torch.randn(N, C_in, H, W, device="cuda", dtype=torch.float32)
-    weight = torch.randn(C_out, C_in, K, K, device="cuda", dtype=torch.float32)
-    bias = torch.randn(C_out, device="cuda", dtype=torch.float32)
+    x = torch.randn(N, C_in, H, W, device="cuda", dtype=_CURRENT_DTYPE)
+    weight = torch.randn(C_out, C_in, K, K, device="cuda", dtype=_CURRENT_DTYPE)
+    bias = torch.randn(C_out, device="cuda", dtype=_CURRENT_DTYPE)
 
     # PyTorch reference
     conv_pt = torch.nn.Conv2d(C_in, C_out, K, stride=stride, padding=pad, bias=True).to("cuda")
@@ -564,7 +592,7 @@ def bench_maxpool2d(size: dict, warmup: int, iters: int) -> list[BenchResult]:
     C, H, W = size["C"], size["H"], size["W"]
     K, stride, pad = size["K"], size["stride"], size["pad"]
 
-    x = torch.randn(N, C, H, W, device="cuda", dtype=torch.float32)
+    x = torch.randn(N, C, H, W, device="cuda", dtype=_CURRENT_DTYPE)
 
     ref = torch.nn.functional.max_pool2d(x, K, stride=stride, padding=pad)
 
@@ -604,7 +632,7 @@ def bench_avgpool2d(size: dict, warmup: int, iters: int) -> list[BenchResult]:
     C, H, W = size["C"], size["H"], size["W"]
     K, stride, pad = size["K"], size["stride"], size["pad"]
 
-    x = torch.randn(N, C, H, W, device="cuda", dtype=torch.float32)
+    x = torch.randn(N, C, H, W, device="cuda", dtype=_CURRENT_DTYPE)
 
     ref = torch.nn.functional.avg_pool2d(x, K, stride=stride, padding=pad)
 
@@ -641,7 +669,7 @@ def bench_avgpool2d(size: dict, warmup: int, iters: int) -> list[BenchResult]:
 
 def bench_softmax(size: dict, warmup: int, iters: int) -> list[BenchResult]:
     M, N = size["M"], size["N"]
-    x = torch.randn(M, N, device="cuda", dtype=torch.float32)
+    x = torch.randn(M, N, device="cuda", dtype=_CURRENT_DTYPE)
 
     ref = torch.nn.functional.softmax(x, dim=1)
 
@@ -770,12 +798,13 @@ def print_results(results: list[BenchResult]):
               f"min: {np.min(cu_speedups):.2f}x  max: {np.max(cu_speedups):.2f}x")
 
 
-def export_json(results: list[BenchResult], path: str):
-    data = []
+def export_json(results: list[BenchResult], path: str, metadata: dict | None = None):
+    rows = []
     for r in results:
         d = {
             "name": r.name,
             "shapes": r.shapes,
+            "dtype": r.dtype,
             "pytorch_ms": r.pytorch_ms,
             "triton_ms": r.triton_ms,
             "pytorch_p95_ms": r.pytorch_p95_ms,
@@ -792,11 +821,33 @@ def export_json(results: list[BenchResult], path: str):
                 "cuda_max_err": r.cuda_max_err,
                 "cuda_speedup": r.cuda_speedup,
             })
-        data.append(d)
+        if r.cutile_ms > 0:
+            d.update({
+                "cutile_ms": r.cutile_ms,
+                "cutile_p95_ms": r.cutile_p95_ms,
+                "cutile_l2_err": r.cutile_l2_err,
+                "cutile_max_err": r.cutile_max_err,
+                "cutile_speedup": r.cutile_speedup,
+            })
+        if r.flops > 0:
+            d.update({
+                "flops": r.flops,
+                "bytes_io": r.bytes_io,
+                "pytorch_tflops": r.pytorch_tflops,
+                "triton_tflops": r.triton_tflops,
+                "cuda_tflops": r.cuda_tflops,
+                "pytorch_gbps": r.pytorch_gbps,
+                "triton_gbps": r.triton_gbps,
+                "cuda_gbps": r.cuda_gbps,
+            })
+        rows.append(d)
+
+    # 新 schema: 顶部 metadata + rows[] (向后兼容: 旧 reader 读 rows 字段即可)
+    payload = {"metadata": metadata or {}, "rows": rows}
 
     Path(path).parent.mkdir(parents=True, exist_ok=True)
     with open(path, "w", encoding="utf-8") as f:
-        json.dump(data, f, indent=2, ensure_ascii=False)
+        json.dump(payload, f, indent=2, ensure_ascii=False)
     print(f"  Results saved to: {path}")
 
 
@@ -815,7 +866,46 @@ def parse_args():
     p.add_argument("--output", type=str, default=None)
     p.add_argument("--precision", type=str, default="tf32", choices=["tf32", "fp32"],
                    help="Precision mode: tf32 (tensor cores) or fp32 (strict)")
+    p.add_argument("--dtypes", type=str, default="fp32",
+                   help="Comma-separated dtypes to sweep: fp32,fp16,bf16")
+    p.add_argument("--roofline", action="store_true",
+                   help="Compute achieved TFLOPS / GB/s per row (matmul-class ops only)")
+    p.add_argument("--seed", type=int, default=42)
     return p.parse_args()
+
+
+def _annotate_roofline(results: list[BenchResult]) -> None:
+    """对 matmul-class ops 填 flops / bytes_io / tflops / gbps。
+
+    现仅处理: matmul / matmul_backward_dA / matmul_backward_dB / fused_mlp_first / conv2d.
+    其他 elementwise ops 不算 TFLOPS (没意义) 但算 GB/s.
+    """
+    import re
+    for r in results:
+        # 解析 shapes 字符串拿到 M,K,N
+        # matmul: "(M,K)@(K,N)"
+        m = re.search(r"\((\d+),(\d+)\)@\((\d+),(\d+)\)", r.shapes)
+        if m:
+            M, K, _, N = int(m.group(1)), int(m.group(2)), int(m.group(3)), int(m.group(4))
+            elem_bytes = 2 if r.dtype in ("fp16", "bf16") else 4
+            r.flops = 2 * M * K * N
+            r.bytes_io = (M * K + K * N + M * N) * elem_bytes
+            for backend in ("pytorch", "triton", "cuda"):
+                ms = getattr(r, f"{backend}_ms")
+                if ms > 0:
+                    setattr(r, f"{backend}_tflops", r.flops / (ms * 1e-3) / 1e12)
+                    setattr(r, f"{backend}_gbps", r.bytes_io / (ms * 1e-3) / 1e9)
+            continue
+        # elementwise: "(n,)"  -> bytes only
+        m2 = re.search(r"^\((\d+),\)", r.shapes)
+        if m2:
+            n = int(m2.group(1))
+            elem_bytes = 2 if r.dtype in ("fp16", "bf16") else 4
+            r.bytes_io = 2 * n * elem_bytes  # 1 read + 1 write
+            for backend in ("pytorch", "triton", "cuda"):
+                ms = getattr(r, f"{backend}_ms")
+                if ms > 0:
+                    setattr(r, f"{backend}_gbps", r.bytes_io / (ms * 1e-3) / 1e9)
 
 
 def main():
@@ -825,12 +915,18 @@ def main():
         print("ERROR: CUDA not available")
         sys.exit(1)
 
+    torch.manual_seed(args.seed)
+
     print(f"Device: {torch.cuda.get_device_name(0)}")
     print(f"Warmup: {args.warmup}, Iters: {args.iters}")
     if _HAS_CUDA:
         print("CUDA kernels: available")
     else:
         print("CUDA kernels: NOT available (mlp_cuda not installed)")
+    if _HAS_CUTILE:
+        print("cuTile kernels: available")
+    else:
+        print("cuTile kernels: NOT available (cuda-tile not installed)")
 
     # 精度配置
     if args.precision == "fp32":
@@ -842,6 +938,20 @@ def main():
         torch.backends.cudnn.allow_tf32 = True
         precision.allow_tf32 = True
     print(f"Precision: {args.precision}")
+
+    # dtype sweep
+    dtype_map = {"fp32": torch.float32, "fp16": torch.float16, "bf16": torch.bfloat16}
+    requested_dtypes = []
+    for s in args.dtypes.split(","):
+        s = s.strip()
+        if s in dtype_map:
+            requested_dtypes.append((s, dtype_map[s]))
+        else:
+            print(f"WARNING: unknown dtype '{s}', skipping")
+    if not requested_dtypes:
+        requested_dtypes = [("fp32", torch.float32)]
+    print(f"Dtypes:    {[d[0] for d in requested_dtypes]}")
+    print(f"Roofline:  {'on' if args.roofline else 'off'}")
 
     # 选择尺寸
     size_names = [s.strip() for s in args.sizes.split(",")]
@@ -858,24 +968,47 @@ def main():
     else:
         op_names = list(OP_REGISTRY.keys())
 
-    # 运行
+    # 运行 (dtype 外层循环, 写全局 _CURRENT_DTYPE)
+    global _CURRENT_DTYPE
     all_results: list[BenchResult] = []
-    for op_name in op_names:
-        if op_name not in OP_REGISTRY:
-            print(f"WARNING: unknown op '{op_name}', skipping")
-            continue
-        bench_fn = OP_REGISTRY[op_name]
-        for size in sizes:
-            results = bench_fn(size, args.warmup, args.iters)
-            all_results.extend(results)
+    for dtype_name, dtype_obj in requested_dtypes:
+        _CURRENT_DTYPE = dtype_obj
+        print(f"\n--- dtype={dtype_name} ---")
+        for op_name in op_names:
+            if op_name not in OP_REGISTRY:
+                print(f"WARNING: unknown op '{op_name}', skipping")
+                continue
+            # bf16/fp16 跳过 conv/pool (op 内部 hardcode fp32)
+            if dtype_name != "fp32" and op_name in ("conv2d", "maxpool", "avgpool"):
+                continue
+            bench_fn = OP_REGISTRY[op_name]
+            for size in sizes:
+                try:
+                    results = bench_fn(size, args.warmup, args.iters)
+                except Exception as e:
+                    print(f"  [{op_name}] {size} dtype={dtype_name} FAILED: {e}")
+                    continue
+                for r in results:
+                    r.dtype = dtype_name
+                all_results.extend(results)
+
+    if args.roofline:
+        _annotate_roofline(all_results)
 
     print_results(all_results)
 
+    md = capture_metadata(args)
+    md["sizes_resolved"] = sizes
+    md["ops"] = op_names
+    md["has_cuda"] = _HAS_CUDA
+    md["has_cutile"] = _HAS_CUTILE
+    md["roofline"] = args.roofline
+
     if args.output:
-        export_json(all_results, args.output)
+        export_json(all_results, args.output, metadata=md)
     else:
         ts = time.strftime("%Y%m%d_%H%M%S")
-        export_json(all_results, f"results/op_bench_{ts}.json")
+        export_json(all_results, f"results/op_bench_{ts}.json", metadata=md)
 
 
 if __name__ == "__main__":

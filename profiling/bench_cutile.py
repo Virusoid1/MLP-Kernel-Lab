@@ -29,6 +29,8 @@ import torch
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
+from python.mnist.benchmark import capture_metadata  # noqa: E402
+
 
 # ============================================================
 # 计时 & GPU warmup
@@ -275,7 +277,17 @@ def main():
                                 max(10, args.iters // 4))
 
     # ---- 汇总 ----
+    metadata = capture_metadata(args)
+    metadata.update({
+        "M": args.M, "K": args.K, "N": args.N,
+        "rounds": args.rounds,
+        "warmup_iters": args.warmup,
+        "measure_iters": args.iters,
+        "gpu_warmup_secs": args.gpu_warmup_secs,
+    })
     all_results = {
+        "metadata": metadata,
+        # legacy key 'config' kept so old readers still see it
         "config": {
             "M": args.M, "K": args.K, "N": args.N,
             "rounds": args.rounds,
