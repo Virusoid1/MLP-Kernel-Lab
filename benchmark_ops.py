@@ -177,8 +177,17 @@ def bench_matmul(size: dict, warmup: int, iters: int) -> list[BenchResult]:
     # 共享 Tensor Core 但累加次序有差, L2 噪声 ~1e+01 (norm). 显式 FP32 让
     # L2 偏差真实反映 "backend 是否启用 TF32 / FP16 / FP32" 而不是
     # "TF32 vs TF32 累加次序噪声".
+    # T (P1-bis): reference 强制 FP32 累加, 不受 precision.allow_tf32 影响.
+    # 之前 ref 在 TF32 模式下也走 TF32, 与 triton.tl.dot(allow_tf32=True)
+    # 共享 Tensor Core 但累加次序有差, L2 噪声 ~1e+01 (norm). 显式 FP32 让
+    # L2 偏差真实反映 "backend 是否启用 TF32 / FP16 / FP32" 而不是
+    # "TF32 vs TF32 累加次序噪声".
+    # AC: --ref-tf32 flag 让用户切回老基线 (ref=TF32, 与原 baseline.json 可比).
+    _ref_tf32_flag = getattr(sys.modules[__name__], "_REF_TF32", False)
     _saved_tf32 = torch.backends.cuda.matmul.allow_tf32
-    torch.backends.cuda.matmul.allow_tf32 = False
+    torch.backends.cuda.matmul.allow_tf32 = (
+        precision.allow_tf32 if _ref_tf32_flag else False
+    )
     try:
         ref = torch.matmul(A, B)
     finally:
@@ -881,6 +890,9 @@ def parse_args():
     p.add_argument("--roofline", action="store_true",
                    help="Compute achieved TFLOPS / GB/s per row (matmul-class ops only)")
     p.add_argument("--seed", type=int, default=42)
+    p.add_argument("--ref-tf32", action="store_true",
+                   help="Bench_matmul reference uses TF32 (matches original baseline.json). "
+                        "Default: ref uses FP32 (exposes backend-vs-cuBLAS-FP32 drift).")
     return p.parse_args()
 
 
@@ -1013,6 +1025,11 @@ def main():
     md["has_cuda"] = _HAS_CUDA
     md["has_cutile"] = _HAS_CUTILE
     md["roofline"] = args.roofline
+    md["ref_tf32"] = args.ref_tf32
+
+    # AC: --ref-tf32 切老基线 (ref 用 TF32), 与原始 baseline.json 可比.
+    # 默认 False = ref 严格 FP32, 暴露 backend 真实数值偏差.
+    sys.modules[__name__]._REF_TF32 = args.ref_tf32
 
     if args.output:
         export_json(all_results, args.output, metadata=md)

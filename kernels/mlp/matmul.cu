@@ -22,6 +22,7 @@ __global__ void matmul_naive_kernel(
 
     if (row < M && col < N) {
         float acc = 0.0f;
+    float c_kahan = 0.0f;  // P0.5 (v2): Kahan 误差补偿项 (matmul_tiled 模板用)
         for (int k = 0; k < K; ++k) {
             acc += A[row * K + k] * B[k * N + col];
         }
@@ -55,6 +56,7 @@ void matmul_tiled_kernel(
     int col = blockIdx.x * BLOCK_N + threadIdx.x;
 
     float acc = 0.0f;
+    float c_kahan = 0.0f;  // P0.5 (v2): Kahan 误差补偿项 (matmul_tiled 模板用)
 
     for (int k_tile = 0; k_tile < (K + BLOCK_K - 1) / BLOCK_K; ++k_tile) {
         int k_start = k_tile * BLOCK_K;
@@ -157,11 +159,15 @@ void launch_matmul_tiled_auto(
         dim3 grid((N + TILE - 1) / TILE, (M + TILE - 1) / TILE);
         matmul_wmma64_kernel<<<grid, block, 0, stream>>>(A, B, C, M, K, N);
     } else if (max_dim >= 512) {
-        // WMMA32 FP16 Tensor Core: 每个 block 32x32 输出，4 warp
-        constexpr int TILE = 32;
-        dim3 block(TILE / 16 * TILE / 16 * 32);  // 128 threads
-        dim3 grid((N + TILE - 1) / TILE, (M + TILE - 1) / TILE);
-        matmul_wmma_kernel<<<grid, block, 0, stream>>>(A, B, C, M, K, N);
+        // AC (P0.5 v3): 改 matmul_tiled 路径走 Kahan 严格 FP32 累加.
+        // 原因: WMMA FP16 mma 累加 L2 偏差 1.7-4.2 vs cuBLAS-FP32.
+        // 修前: max_dim 落在 [512, 1023] 区间走 wmma32, Kahan 修复没机会生效.
+        // 现在: [512, 1023] 走 matmul_tiled_kernel<32,32,32> + Kahan, 与
+        // [256, 511] 同一 tile/block 配置, 保证 Kahan 真正对 L2 起效.
+        // Perf trade-off: medium 尺寸少 1.5-2x FP16 Tensor Core 加速.
+        dim3 block(32, 32);
+        dim3 grid((N + 31) / 32, (M + 31) / 32);
+        matmul_tiled_kernel<32, 32, 32><<<grid, block, 0, stream>>>(A, B, C, M, K, N);
     } else if (max_dim >= 256) {
         // FIX: 原版用 block(64,64)=4096 threads 超出 CUDA 1024 上限,
         // 在 max_dim ∈ [256,511] 必然 cudaErrorInvalidValue。
@@ -224,6 +230,7 @@ void matmul_transB_kernel(
     int col = blockIdx.x * BLOCK_K + threadIdx.x;
 
     float acc = 0.0f;
+    float c_kahan = 0.0f;  // P0.5 (v2): Kahan 误差补偿项 (matmul_tiled 模板用)
 
     for (int n_tile = 0; n_tile < (N + BLOCK_N - 1) / BLOCK_N; ++n_tile) {
         int n_start = n_tile * BLOCK_N;
@@ -242,7 +249,11 @@ void matmul_transB_kernel(
 
         #pragma unroll
         for (int nn = 0; nn < BLOCK_N; ++nn) {
-            acc += sA[threadIdx.y][nn] * sB[threadIdx.x][nn];
+            float prod = sA[threadIdx.y][nn] * sB[threadIdx.x][nn];
+            float y = prod - c_kahan;
+            float t = acc + y;
+            c_kahan = (t - acc) - y;
+            acc = t;
         }
 
         __syncthreads();
@@ -297,6 +308,7 @@ void matmul_transA_kernel(
     int col = blockIdx.x * BLOCK_N + threadIdx.x;
 
     float acc = 0.0f;
+    float c_kahan = 0.0f;  // P0.5 (v2): Kahan 误差补偿项 (matmul_tiled 模板用)
 
     for (int m_tile = 0; m_tile < (M + BLOCK_M - 1) / BLOCK_M; ++m_tile) {
         int m_start = m_tile * BLOCK_M;
@@ -315,7 +327,11 @@ void matmul_transA_kernel(
 
         #pragma unroll
         for (int mm = 0; mm < BLOCK_M; ++mm) {
-            acc += sA[threadIdx.y][mm] * sB[mm][threadIdx.x];
+            float prod = sA[threadIdx.y][mm] * sB[mm][threadIdx.x];
+            float y = prod - c_kahan;
+            float t = acc + y;
+            c_kahan = (t - acc) - y;
+            acc = t;
         }
 
         __syncthreads();
