@@ -132,6 +132,65 @@ python tools/analyze_bench.py results/baselines/d621338.json results/baselines/6
 | Version | Change | Latency (ms) | TFLOPS | Speedup vs v0 | git_sha |
 |---------|--------|-------------|--------|---------------|---------|
 | v0 | wmma64 K-dim fix | 1.09 (8×784×1024) | — | correctness baseline | 665dc07 |
+| v1 | fused_mlp_first block fix + ref-FP32 | — | — | correctness gate enabled | (pending) |
 | v1-v6 | — | — | — | — | — |
+
+---
+
+### v1: `fused_mlp_first_layer` 块尺寸修复 + ref-FP32 暴露 CUDA matmul K-split 需求
+
+**问题**:
+- `fused_mlp_first_layer` 在 `(M,K,N)=(512,768,512)` 启动 `block(64,64)=4096 threads`,超 CUDA 1024 硬限,`cudaErrorInvalidValue`。
+- `benchmark_ops.py` 的 reference `a @ b` 跟随全局 `allow_tf32=True`,**与自研 backend 的 TF32 / FP32 选择混在一起**, 无法孤立数值偏差。
+
+**修改**:
+- `kernels/mlp/fused.cu` `launch_mlp_fused_first_layer` 的 `max_dim >= 512` 分支:`block(64,64)=4096` → `block(32,32)=1024` + tile 从 `<64,64,32>` 改 `<32,32,32>`。
+- `benchmark_ops.py` `bench_matmul` reference 用 `with torch.backends.cuda.matmul.allow_tf32 = False: ref = a @ b` 显式 FP32,让 L2 偏差真实反映 backend vs cuBLAS-FP32。
+
+**metadata**:
+```yaml
+gpu:        {name: "NVIDIA GeForce RTX 5070 Ti", cc: "12.0", vram_gb: 16.0}
+driver:     "596.36"
+torch:      "2.11.0+cu130"
+cudnn:      "90100"
+allow_tf32: false
+seed:       42
+dtype:      "fp32"
+git_sha:    "8991e9d"
+ts:         "2026-06-03T12:50:00Z"
+```
+
+**command**:`make install && python benchmark_ops.py --sizes medium --dtypes fp32 --roofline --warmup 20 --iters 100 --output results/baseline_post_p0p1_v2.json`
+
+**verify**:
+```
+python tools/analyze_bench.py results/baseline_pre_p0p1.json results/baseline_post_p0p1_v2.json --shape all
+# P0 fused_mlp_first (256,512) 与 (512,768) 行从 MISSING → OK (2 行 × 3 backend = 6 行)
+# 其余行 perf 改变在 ±70% 范围内,无 CORRECTNESS_FAIL
+```
+
+**regression(精度,P0 fused_mlp_first)**:
+
+| shape | 修前 | 修后 |
+|-------|------|------|
+| (256,512)@(512,256) GELU | cudaErrorInvalidValue | max_abs 2.7e-05 |
+| (512,768)@(768,512) GELU | cudaErrorInvalidValue | max_abs 2.7e-05 |
+
+**P0.5 失败经验(已记录)**:
+尝试 matmul_tiled_kernel 用 2 路 K-split 双累加器 (Kahan-like) 修 CUDA FP32 偏差。**实测无效**:L2 4.17 → 4.17 不变。2 路 split 不足以消除 cuBLAS 的 4 路 K-split 精度差,需 Kahan summation 或 4-8 路 split + 误差补偿。回滚后保留为下次 TODO。
+
+**P0.5 意外副产品(ref-FP32 暴露精度)**:
+
+| matmul shape | 改前 L2(ref TF32) | 改后 L2(ref FP32) | 解读 |
+|---|---|---|---|
+| (256,512) CUDA | 2.5e-03 | 1.7e+00 | 真数值偏差被 ref=TF32 掩盖,改后浮出 |
+| (512,768) CUDA | 1.3e-02 | 4.2e+00 | 同上 |
+
+**分析**:
+- P0 fused_mlp_first 修是单纯 dispatch 错(4096 threads),改 1 行,真有效。
+- ref-FP32 改动**改变了基准** — 与 `baseline_pre_p0p1.json` 比对看到的"REGRESS"是测量方法变化不是 perf 退化;真实数据应该看两边的实际 ms 数值,不能单看 `analyze_bench.py` 的 delta% 列(因为 ref 改了)。
+- P0.5 matmul K-split 修复在 BF16/FP16 路径走 mma 时不适用(精度已被 Tensor Core 累加保证);仅在 FP32 严格模式下才显出差异。
+
+---
 
 > 数字必须来源于 `make bench-op` 实际跑出,不要编造。任何一行没数据,留空即可。

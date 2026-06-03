@@ -68,9 +68,12 @@ void launch_mlp_fused_first_layer(
     max_dim = max_dim > K ? max_dim : K;
 
     if (max_dim >= 512) {
-        dim3 block(64, 64);
-        dim3 grid((N + 63) / 64, (M + 63) / 64);
-        mlp_fused_first_layer_kernel<64, 64, 32><<<grid, block, 0, stream>>>(
+        // FIX (P0): 原版用 block(64,64)=4096 threads 超出 CUDA 1024 上限,
+        // 在 fused_mlp_first_layer (M,K,N)=(512,768,512) 时必然 cudaErrorInvalidValue.
+        // 退到 32x32 tile + block(32,32)=1024 threads (与 matmul 修复同模式).
+        dim3 block(32, 32);
+        dim3 grid((N + 31) / 32, (M + 31) / 32);
+        mlp_fused_first_layer_kernel<32, 32, 32><<<grid, block, 0, stream>>>(
             X, W1, bias, H, M, K, N);
     } else if (max_dim >= 128) {
         dim3 block(32, 32);

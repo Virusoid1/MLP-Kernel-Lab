@@ -172,7 +172,17 @@ def bench_matmul(size: dict, warmup: int, iters: int) -> list[BenchResult]:
     A = torch.randn(M, K, device="cuda", dtype=_CURRENT_DTYPE)
     B = torch.randn(K, N, device="cuda", dtype=_CURRENT_DTYPE)
 
-    ref = torch.matmul(A, B)
+    # T (P1-bis): reference 强制 FP32 累加, 不受 precision.allow_tf32 影响.
+    # 之前 ref 在 TF32 模式下也走 TF32, 与 triton.tl.dot(allow_tf32=True)
+    # 共享 Tensor Core 但累加次序有差, L2 噪声 ~1e+01 (norm). 显式 FP32 让
+    # L2 偏差真实反映 "backend 是否启用 TF32 / FP16 / FP32" 而不是
+    # "TF32 vs TF32 累加次序噪声".
+    _saved_tf32 = torch.backends.cuda.matmul.allow_tf32
+    torch.backends.cuda.matmul.allow_tf32 = False
+    try:
+        ref = torch.matmul(A, B)
+    finally:
+        torch.backends.cuda.matmul.allow_tf32 = _saved_tf32
 
     # Triton
     tr_out = tiled_matmul(A, B)
