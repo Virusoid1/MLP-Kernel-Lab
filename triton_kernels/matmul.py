@@ -73,9 +73,20 @@ _MATMUL_CONFIGS = [
         num_stages=5, num_warps=2,
     ),
     # --- 小 tile：MNIST 等小矩阵场景 ---
+    # 64x64 强制配置:小 M (B=64) 走 2x N tile,num_warps=4 平衡 register / shmem
     triton.Config(
-        {"BLOCK_M": 32, "BLOCK_N": 32, "BLOCK_K": 32, "GROUP_SIZE_M": 8},
+        {"BLOCK_M": 64, "BLOCK_N": 64, "BLOCK_K": 32, "GROUP_SIZE_M": 8},
         num_stages=4, num_warps=4,
+    ),
+    # 64x128:小 M 时把 N tile 翻倍,适合 (64, 1024) shape
+    triton.Config(
+        {"BLOCK_M": 64, "BLOCK_N": 128, "BLOCK_K": 32, "GROUP_SIZE_M": 8},
+        num_stages=3, num_warps=4,
+    ),
+    # 128x64:M tile 大一倍,适合 (64, 784) K=784 的场景
+    triton.Config(
+        {"BLOCK_M": 128, "BLOCK_N": 64, "BLOCK_K": 32, "GROUP_SIZE_M": 8},
+        num_stages=3, num_warps=4,
     ),
 ]
 

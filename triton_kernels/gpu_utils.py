@@ -71,7 +71,10 @@ def get_arch_params() -> dict:
             "max_block_m": 256, "max_block_n": 256, "max_block_k": 128,
             "max_stages": 6, "max_warps": 16,
             "elementwise_block": 8192,
-            "cutile_matmul_tile": (64, 64, 32),
+            # (16, 16, 16) 是 Blackwell ct.mma 的 native fragment 尺寸 (m16n8k16);
+            # 大 tile (64, 64, 32) 增加 padding + 循环 overhead,在 MLP 这种 (64, K, N)
+            # 小 batch 场景下反而慢 1.5-3x. Per-shape sweep 4 个 MLP shape 验证.
+            "cutile_matmul_tile": (16, 16, 16),
             "cutile_elementwise_tile": 1024,
             "cutile_layernorm_tile": 512,
         }

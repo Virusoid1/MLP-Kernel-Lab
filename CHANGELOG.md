@@ -1,5 +1,42 @@
 # CHANGELOG
 
+## 2026-06-04 #1 — Triton matmul 64×64 + cuTile tile (16,16,16),per-op matmul 3-6x 提速
+
+**内容:**
+- `triton_kernels/matmul.py`: 删除 autotune 中 32×32 fallback,加 64×64 / 64×128 / 128×64 tile(全 num_warps=4)。原 fallback 在 M=64 小 batch 场景下被 autotune 抖动误选为"最快",实际 GPU 跑出 0.091ms;64×64 tile 0.024ms,**4 layer matmul 单步 0.36→0.09ms**。
+- `triton_kernels/gpu_utils.py`: Blackwell arch 的 `cutile_matmul_tile` 从 (64,64,32) 改为 (16,16,16)。(16,16,16) 是 Blackwell `mma.sync.aligned.m16n8k16` 的 native fragment;大 tile 在小 batch 场景增加 padding + 循环 overhead,4 个 MLP shape 实测全部 1.5-3x 慢。改了 `cutile_matmul_tile` 同时影响 forward + backward matmul(`cutile_kernels/matmul.py` / `cutile_kernels/backward.py`)。cuTile 4 个 MLP shape matmul 0.575ms → 0.110ms。
+- `tools/gpu_warmup.py` / `tools/run_full_eval.sh`: 60s GPU 预热 + 4 轮重复 + 后 3 轮均值 driver,支持 `--skip-compare` / `--rounds` / `--take-last` / `--compare-precision`。
+
+**验证 (per-op bench, 4 轮均, fp32 strict):**
+
+| shape | triton 旧 | triton 新 | cuTile 旧 | cuTile 新 |
+|-------|-----------|-----------|-----------|-----------|
+| (64, 784, 1024) | 0.091ms | **0.024ms** | 0.174ms | **0.035ms** |
+| (64, 1024, 512) | 0.091ms | **0.028ms** | 0.226ms | **0.044ms** |
+| (64, 512, 256) | 0.091ms | **0.017ms** | 0.115ms | **0.019ms** |
+| (64, 256, 10) | 0.091ms | **0.018ms** | 0.060ms | **0.012ms** |
+
+**端到端 (15 epoch, fp32 strict, 4 轮后 3 均):**
+
+| backend | 旧 train_s | 新 train_s | 旧 step_med | 新 step_med |
+|---------|------------|------------|-------------|-------------|
+| PyTorch | 24.3s | 24.3s | 1.78ms | 1.15ms |
+| Triton  | 41.8s | 44.1s | 1.88ms | 2.04ms |
+| CUDA    | 24.9s | 25.1s | 1.14ms | 1.12ms |
+| cuTile  | 25.9s | 26.7s | 3.17ms | **2.32ms (-27%)** |
+
+**根因复盘:** per-op 3-6x 提速未能转化为端到端等比例提速。MLP 训练 step 内 matmul kernel 时延仅占 1-2ms 不到 5%,主导是 Python launch overhead + AdamW 状态更新 + DataLoader I/O + `.item()` 同步。**cuTile step_med -27% 是真改善,triton/pytorch 端到端无变化是因为它们的 matmul 占比已很小。**
+
+**D 方案其余 step 决策:**
+- #1 (CUDA Graph): capture 时遇到 `cudaErrorStreamCaptureImplicit` (autograd AccumulateGrad stream 与 capture stream 不一致),fallback 到 eager 路径复杂,收益仅 ~3s 不抵成本,**未保留**。
+- #3 (fused_bias_gelu): 跳过。per-op 节省 0.02ms,端到端预估 <0.1s。
+- #5 (完整 fused MLP): 跳过。改动 150 行复杂 kernel,fp32 strict 数值调试成本高,预估端到端 <3s 收益。
+
+**记录位置:**
+- `results/full_eval_20260604_001432/` 含 4 轮 op bench + 4 轮 cuTile bench + 4-backend 端到端 fp32 strict 完整数据。
+- `results/compare_*.json` 4 份独立 compare_*.json 落盘。
+- Driver `bash tools/run_full_eval.sh` 重现。
+
 ## 2026-06-03 #1 — 修 wmma64 数值 bug,CUDA 精度回归彻底解决
 
 **内容:**
