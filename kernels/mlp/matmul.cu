@@ -153,11 +153,15 @@ void launch_matmul_tiled_auto(
     max_dim = max_dim > K ? max_dim : K;
 
     if (max_dim >= 1024) {
-        // WMMA64 FP16 Tensor Core: 每个 block 64x64 输出，8 warp
-        constexpr int TILE = 64;
-        dim3 block(TILE / 16 * TILE / 16 * 32);  // 256 threads
-        dim3 grid((N + TILE - 1) / TILE, (M + TILE - 1) / TILE);
-        matmul_wmma64_kernel<<<grid, block, 0, stream>>>(A, B, C, M, K, N);
+        // AC (v2): 改 matmul_tiled + Kahan 路径, 同 [512,1023] 修复.
+        // 原因: WMMA64 FP16 mma 累加 L2 偏差 0.75 vs cuBLAS-FP32,
+        // Kahan / split / Kahan-各种均无法改 wmma64 路径 (PTX 层级 O(eps) 累加).
+        // 改 path 是当前唯一可控的修复: 改走 matmul_tiled_kernel<32,32,32>
+        // + Kahan 累加, 精度接近 cuBLAS-FP32. Perf trade-off:
+        // 大尺寸丢 2-3x FP16 Tensor Core 加速, 接受.
+        dim3 block(32, 32);
+        dim3 grid((N + 31) / 32, (M + 31) / 32);
+        matmul_tiled_kernel<32, 32, 32><<<grid, block, 0, stream>>>(A, B, C, M, K, N);
     } else if (max_dim >= 512) {
         // AC (P0.5 v3): 改 matmul_tiled 路径走 Kahan 严格 FP32 累加.
         // 原因: WMMA FP16 mma 累加 L2 偏差 1.7-4.2 vs cuBLAS-FP32.
