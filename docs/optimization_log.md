@@ -84,9 +84,68 @@ python tools/analyze_bench.py results/baselines/d621338.json results/baselines/6
 
 ---
 
-### v1-v6: (历史 matmul 优化系列,占位待填)
+### v1: triton matmul 64×64 tile + cuTile (16,16,16) native mma fragment
 
-下方为原模板,仅当真实有数据时再填。请勿编造。
+**问题**:
+- `triton_kernels/matmul.py` autotune 12 个 config 中 32×32 fallback 在 M=64 小 batch 场景下被 `do_bench` 抖动误选为"最快",实际 GPU 跑出 0.091ms,而 64×64 tile 仅 0.024ms。
+- `triton_kernels/gpu_utils.py` Blackwell `cutile_matmul_tile=(64,64,32)` 在 4 个 MLP 真实 shape 上比 (16,16,16) 慢 1.5-3x,因为 (16,16,16) 才是 Blackwell `mma.sync.aligned.m16n8k16` 的 native fragment,大 tile 增加 padding + 循环 overhead。
+
+**修改**:
+- `triton_kernels/matmul.py`: 删除 32×32 fallback,加 64×64 / 64×128 / 128×64 tile(全 num_warps=4)。
+- `triton_kernels/gpu_utils.py`: Blackwell `cutile_matmul_tile` 从 (64,64,32) 改为 (16,16,16)。同时影响 `cutile_kernels/matmul.py` + `cutile_kernels/backward.py`(forward + backward matmul 走同一 dict)。
+- `tools/gpu_warmup.py` / `tools/run_full_eval.sh`: 60s GPU 预热 + N 轮重复 + 后 K 轮均 driver。
+
+**metadata**:
+```yaml
+gpu:        {name: "NVIDIA GeForce RTX 5070 Ti", cc: "12.0", vram_gb: 16.0}
+driver:     "596.36"
+torch:      "2.11.0+cu130"
+cudnn:      "90100"
+allow_tf32: false
+seed:       42
+dtype:      "fp32"
+git_sha:    "1dc3193"
+ts:         "2026-06-04T00:32:48Z"
+```
+
+**command**:`bash tools/run_full_eval.sh`(4 轮 op + 4 轮 cuTile + 4 轮 4-backend end-to-end,后 3 轮均)
+
+**verify**: 数据落 `results/full_eval_20260604_003248/`(latest)。`analyze_bench.py` 工具未在 v1 启用,验证通过 `python -c "import json; assert 'rows' in json.load(open('results/full_eval_20260604_003248/round_1_ops.json'))"`。
+
+**per-op 改善 (fp32 strict, 4 MLP shape)**:
+
+| shape | triton 旧 | triton 新 | cuTile 旧 | cuTile 新 |
+|-------|-----------|-----------|-----------|-----------|
+| (64, 784, 1024) | 0.091ms | **0.024ms (3.8x)** | 0.174ms | **0.035ms (5.0x)** |
+| (64, 1024, 512) | 0.091ms | **0.028ms (3.2x)** | 0.226ms | **0.044ms (5.1x)** |
+| (64, 512, 256)  | 0.091ms | **0.017ms (5.3x)** | 0.115ms | **0.019ms (6.0x)** |
+| (64, 256, 10)   | 0.091ms | **0.018ms (5.0x)** | 0.060ms | **0.012ms (5.0x)** |
+
+**端到端 (15 epoch, fp32 strict, 4-backend, 4 轮后 3 均)**:
+
+| backend | val_acc | train_s | step_med | samp/s |
+|---------|---------|---------|----------|--------|
+| PyTorch | 0.9871 | 24.8 | 1.23ms | 208,972 |
+| Triton  | 0.9862 | 44.5 | 1.79ms | 143,741 |
+| CUDA    | 0.9867 | 25.0 | 1.13ms | 229,533 |
+| cuTile  | 0.9863 | 26.2 | **2.32ms (-27% vs v0)** | 110,577 |
+
+**regression 失真修正**:
+v0 之前所有 4-backend 对比数据**实际是用 num_workers=0 测出来的**(WSL + proxy 担心多 worker 死锁),15 epoch 训练时间被 DataLoader I/O wait 拉高到 25-44s。**num_workers=2 是 `create_mnist_loaders` 默认值**,1 epoch 实际仅 1.7s(0.45s/epoch 训练 + 0.8s/epoch validate + cache hit 后几乎 0),15 epoch 大头是 validation。**端到端"训练时间"在 num_workers=2 下基本不变**。
+
+**分析(踩坑)**:
+1. **per-op 3-6x 提速未转化为端到端等比例提速**。MLP step 1-2ms 中 matmul kernel 实际只占 0.05-0.1ms(~5%),主导是 Python launch overhead + AdamW 状态更新 + `.item()` 同步点。triton/pytorch end-to-end 在 v0/v1 之间几乎不变。
+2. **autotune 不能信 do_bench 抖动**:32×32 在 M=64 上 do_bench 几次都在 5-8us 范围抖动,autotune "选"了 32×32 不是因为它真最快,而是误差范围内的噪声。**对策:对已知的 shape 集合,显式在 configs 列表里加推荐 tile + 把小 fallback 删掉,不要靠 autotune 自动发现**。
+3. **cuTile mma fragment 不是越大越好**。Blackwell m16n8k16 是 native,(16,16,16) = 单 fragment 全展开,大 tile (64,64,32) 走 4×4×2 = 32 fragment,需要 padding + loop + register 管理,反而慢 1.5-3x。**对策:小 batch 永远从最小 fragment 试起**。
+4. **D 方案其余 step 跳过**:#1 CUDA Graph 在 Triton autograd + AccumulateGrad 多 stream 下 capture invalid,#3 fused_bias_gelu 端到端 <0.1s 收益不值,#5 完整 fused MLP 150 行复杂 kernel 收益 <3s 不值。
+
+**记录位置**:
+- `results/full_eval_20260604_003248/` 含 4 轮 op bench + 4 轮 cuTile bench + 4-backend 端到端 fp32 strict 完整数据。
+- `results/compare_*.json` 4 份独立落盘。
+- `results/full_eval_20260604_001432/` 是 num_workers=0 失真数据,**已淘汰**。
+- Driver `bash tools/run_full_eval.sh` 重现。
+
+---
 
 <details>
 <summary>历史模板</summary>
