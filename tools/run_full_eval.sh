@@ -23,8 +23,15 @@ ROUNDS=${ROUNDS:-4}
 TAKE_LAST=${TAKE_LAST:-3}
 WARMUP_SECS=${WARMUP_SECS:-60}
 SKIP_COMPARE=0
+MODELS=${MODELS:-default}
 TS=$(date +%Y%m%d_%H%M%S)
 OUT_DIR="results/full_eval_${TS}"
+
+# 把 model 名字映射到 yaml 路径
+declare -A MODEL_YAML
+MODEL_YAML[default]="configs/mnist_mlp.yaml"
+MODEL_YAML[deep_narrow]="configs/mnist_mlp_deep_narrow.yaml"
+MODEL_YAML[wide_skip]="configs/mnist_mlp_wide_skip.yaml"
 
 while [[ $# -gt 0 ]]; do
     case "$1" in
@@ -33,8 +40,17 @@ while [[ $# -gt 0 ]]; do
         --warmup-secs)   WARMUP_SECS=$2; shift 2;;
         --skip-compare)  SKIP_COMPARE=1; shift;;
         --out-dir)       OUT_DIR=$2; shift 2;;
+        --models)        MODELS=$2; shift 2;;
         *) echo "unknown arg $1" >&2; exit 2;;
     esac
+done
+
+# 校验 model 名字
+for m in $(echo "$MODELS" | tr ',' ' '); do
+    if [[ -z "${MODEL_YAML[$m]:-}" ]]; then
+        echo "unknown model '$m' (valid: ${!MODEL_YAML[*]})" >&2
+        exit 2
+    fi
 done
 
 mkdir -p "$OUT_DIR"
@@ -69,17 +85,23 @@ echo
 
 # ---------- 3. 4 轮 end-to-end (可选) ----------
 if [[ $SKIP_COMPARE -eq 0 ]]; then
-    echo "[3/3] end-to-end 4-backend compare x $ROUNDS rounds ..."
-    for r in $(seq 1 $ROUNDS); do
-        echo "  --- compare round $r/$ROUNDS ---"
-        python run_compare.py --cuda --cutile --precision "${COMPARE_PRECISION:-fp32}" --epochs 15 \
-            2>&1 | tail -3
+    for model in $(echo "$MODELS" | tr ',' ' '); do
+        CONFIG="${MODEL_YAML[$model]}"
+        MODEL_OUT="$OUT_DIR/model_${model}"
+        mkdir -p "$MODEL_OUT"
+        echo "[3/3] model=$model  config=$CONFIG  end-to-end 4-backend x $ROUNDS rounds ..."
+        for r in $(seq 1 $ROUNDS); do
+            echo "  --- $model compare round $r/$ROUNDS ---"
+            python run_compare.py --config "$CONFIG" --cuda --cutile \
+                --precision "${COMPARE_PRECISION:-fp32}" --epochs 15 \
+                2>&1 | tail -3
+        done
+        # 复制该 model 最后 1 份 compare 进 MODEL_OUT
+        LATEST_ONE=$(ls -t results/compare_*.json 2>/dev/null | head -1)
+        if [[ -n "$LATEST_ONE" ]]; then
+            cp "$LATEST_ONE" "$MODEL_OUT/last_compare.json"
+        fi
     done
-    # 把最后一份 compare_*.json 复制进 OUT_DIR
-    LATEST_CMP=$(ls -t results/compare_*.json 2>/dev/null | head -1)
-    if [[ -n "$LATEST_CMP" ]]; then
-        cp "$LATEST_CMP" "$OUT_DIR/last_compare.json"
-    fi
 else
     echo "[3/3] end-to-end skipped (--skip-compare)"
 fi

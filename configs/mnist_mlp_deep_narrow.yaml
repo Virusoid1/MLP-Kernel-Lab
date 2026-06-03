@@ -1,0 +1,26 @@
+# MNIST MLP Deep-Narrow: 8 层 256 hidden,深度 + 多次 LayerNorm 对比
+# 用于测试 LN 摊销和深度对 4 backend 的差异化影响.
+model:
+  hidden_dims: [784, 256, 256, 256, 256, 256, 256, 256, 10]
+  activation: gelu
+  dropout: 0.0
+  use_layernorm: true
+  use_residual: false
+
+training:
+  batch_size: 256
+  epochs: 15
+  learning_rate: 0.001
+  weight_decay: 0.0001
+
+benchmark:
+  warmup_steps: 5
+  measure_steps: 20
+  inference_warmup: 10
+  inference_measure: 50
+
+output:
+  results_dir: results
+  save_checkpoint: false
+
+seed: 42

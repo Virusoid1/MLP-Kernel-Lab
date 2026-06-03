@@ -1,0 +1,27 @@
+# MNIST MLP Wide-Skip: 3 层 1024 hidden + 残差(post-LN).
+# 784→1024 单层, 后 1024→1024→1024 形成残差块, 1024→10 单层.
+# 用于测试残差 + 大 width 对 4 backend 的影响.
+model:
+  hidden_dims: [784, 1024, 1024, 1024, 10]
+  activation: gelu
+  dropout: 0.0
+  use_layernorm: true
+  use_residual: true
+
+training:
+  batch_size: 256
+  epochs: 15
+  learning_rate: 0.001
+  weight_decay: 0.0001
+
+benchmark:
+  warmup_steps: 5
+  measure_steps: 20
+  inference_warmup: 10
+  inference_measure: 50
+
+output:
+  results_dir: results
+  save_checkpoint: false
+
+seed: 42
