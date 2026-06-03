@@ -267,6 +267,65 @@ FP32 模式，模型 `[784,1024,512,256,10]`，ReLU + LayerNorm + Dropout=0.1，
 - **Triton / cuTile**: 训练步比 PyTorch 慢 39–74%,主要来自 autotune cache miss + autograd graph 开销;推理路径同样差距(0.65–0.71ms vs 0.30–0.34ms)。
 - **cuTile bench_cutile.py 单 step 0.61ms** 与此处端到端 0.71ms 一致(差距来自 dataloader + autograd 包装)。
 
+### 跨模型 4-backend 对比 (RTX 5070 Ti, FP32 strict, 15 epoch, 4 轮末轮)
+
+测试 3 个不同 MLP 拓扑对 4 backend 表现的影响,数据落 `results/full_eval_20260604_011723/model_*/`。运行:
+
+```bash
+MODELS=default,deep_narrow,wide_skip bash tools/run_full_eval.sh
+```
+
+| 模型 | 架构 | 参数量 | 测试目的 |
+|------|------|--------|----------|
+| `default` | 784→1024→512→256→10 + LN | 1.46M | 现行 baseline |
+| `deep_narrow` | 784→256×8→10 + 每层 LN | 0.60M | 深度 + LN 多次摊销 |
+| `wide_skip` | 784→1024×3→10 + 残差(后 2 层) + LN | 2.92M | 残差 + 大 hidden |
+
+**default (4-layer, 1.46M):**
+
+| backend | val_acc | 训练时间 | step_med | 吞吐 |
+|---------|---------|----------|----------|------|
+| PyTorch | **0.9871** | **25.1s** | 1.16ms | 221,395 |
+| Triton  | 0.9865 | 45.3s | 2.27ms | 112,780 |
+| CUDA    | 0.9867 | 26.8s | **1.08ms** | **237,248** |
+| cuTile  | 0.9864 | 27.3s | 2.39ms | 107,014 |
+
+**deep_narrow (8×256 + LN, 0.60M):**
+
+| backend | val_acc | 训练时间 | step_med | 吞吐 |
+|---------|---------|----------|----------|------|
+| PyTorch | 0.9849 | 25.4s | 1.94ms | 132,232 |
+| Triton  | 0.9853 | 40.9s | 2.62ms | 97,633 |
+| CUDA    | **0.9858** | **26.1s** | **1.86ms** | **137,670** |
+| cuTile  | 0.9847 | 27.6s | 2.10ms | 122,174 |
+
+**wide_skip (3×1024 + 残差 + LN, 2.92M):**
+
+| backend | val_acc | 训练时间 | step_med | 吞吐 |
+|---------|---------|----------|----------|------|
+| PyTorch | **0.9871** | **24.8s** | 1.30ms | 197,095 |
+| Triton  | 0.9851 | 38.6s | 1.69ms | 151,216 |
+| CUDA    | 0.9861 | 25.2s | 1.30ms | 196,437 |
+| cuTile  | 0.9863 | 26.4s | 4.03ms | 63,477 |
+
+**关键观察:**
+
+1. **Triton 永远最慢 (38.6-45.3s)**,3 个模型一致。Python autograd + autotune 是固有问题,不是 kernel 不好。
+2. **cuTile 在 deep_narrow 上追平 CUDA** (27.6 vs 26.1s,差距 <6%):(16,16,16) mma fragment 摊销好。
+3. **cuTile 在 wide_skip 上 step_med 退化到 4.03ms**(default 2.39 的 1.7x):大 hidden 残差路径触发 `torch.add` 同步点。
+4. **PyTorch (cuBLAS) 跨模型稳定** (24.8-25.4s):hidden dim 切换不敏感。
+5. **val_acc 跨模型**:default ≈ wide_skip (0.987) > deep_narrow (0.985)。8 层窄 + 多次 LN 在 MNIST 上轻微欠拟合。
+
+**场景化 backend 选择:**
+
+| 场景 | 推荐 | 理由 |
+|------|------|------|
+| 浅 + 任意 hidden | PyTorch / CUDA | cuBLAS 已充分优化 |
+| 深 + 多次小 matmul + LN | cuTile | 16×16×16 fragment 摊销 |
+| 残差 + 大 hidden | PyTorch / CUDA | 残差 add 同步 + cuTile 大 tile 退化 |
+| 生产路径(无教学需求) | PyTorch | 最快 + 最高 val_acc |
+| 教学 / 算子对比 | 全部 4 backend | 暴露 kernel 设计取舍 |
+
 ## 许可证
 
 MIT

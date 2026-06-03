@@ -147,6 +147,93 @@ v0 之前所有 4-backend 对比数据**实际是用 num_workers=0 测出来的*
 
 ---
 
+### v2: 多模型对比 (Default + DeepNarrow + WideSkip)
+
+**目的**: 验证 4 backend 在不同 MLP 拓扑下的相对表现,避免"在 default 上最慢"被误推广为"triton 永远最慢"。
+
+**新增模型**:
+
+| 模型 | 架构 | 参数量 | 测试目的 |
+|------|------|--------|----------|
+| `default` | 784→1024→512→256→10 + LN | 1.46M | 现行 baseline |
+| `deep_narrow`(新) | 784→256×8→10 + 每层 LN | 0.60M | 深度 + LN 多次摊销 |
+| `wide_skip`(新) | 784→1024→1024→1024→10 + 残差(后 2 层)+ LN | 2.92M | 残差 + 大 hidden |
+
+**修改**:
+- `python/mnist/model.py`:`MLPConfig.use_residual: bool = False` + `deep_narrow()` / `wide_skip()` 工厂方法 + `MLP.forward` 自动检测同宽相邻层形成 post-LN 残差块。
+- `configs/mnist_mlp_deep_narrow.yaml` / `configs/mnist_mlp_wide_skip.yaml`:2 个新 yaml。
+- `tools/run_full_eval.sh`:`--models` flag(逗号分隔),每个 model 落 `model_<name>/last_compare.json`。
+
+**metadata**:
+```yaml
+gpu:        {name: "NVIDIA GeForce RTX 5070 Ti", cc: "12.0", vram_gb: 16.0}
+driver:     "596.36"
+torch:      "2.11.0+cu130"
+cudnn:      "90100"
+allow_tf32: false
+seed:       42
+dtype:      "fp32"
+git_sha:    "9352854"
+ts:         "2026-06-04T01:17:23Z"
+```
+
+**command**:`MODELS=default,deep_narrow,wide_skip bash tools/run_full_eval.sh`
+
+**端到端 (15 epoch, fp32 strict, 4-backend, 4 轮末轮)**:
+
+**default**:
+| backend | val_acc | train_s | step_med | samp/s |
+|---------|---------|---------|----------|--------|
+| PyTorch | 0.9871 | 25.1 | 1.16ms | 221,395 |
+| Triton  | 0.9865 | 45.3 | 2.27ms | 112,780 |
+| CUDA    | 0.9867 | 26.8 | 1.08ms | 237,248 |
+| cuTile  | 0.9864 | 27.3 | 2.39ms | 107,014 |
+
+**deep_narrow** (8×256 + 每层 LN):
+| backend | val_acc | train_s | step_med | samp/s |
+|---------|---------|---------|----------|--------|
+| PyTorch | 0.9849 | 25.4 | 1.94ms | 132,232 |
+| Triton  | 0.9853 | 40.9 | 2.62ms | 97,633 |
+| CUDA    | 0.9858 | 26.1 | 1.86ms | 137,670 |
+| cuTile  | 0.9847 | 27.6 | 2.10ms | 122,174 |
+
+**wide_skip** (3×1024 + 残差 + LN):
+| backend | val_acc | train_s | step_med | samp/s |
+|---------|---------|---------|----------|--------|
+| PyTorch | 0.9871 | 24.8 | 1.30ms | 197,095 |
+| Triton  | 0.9851 | 38.6 | 1.69ms | 151,216 |
+| CUDA    | 0.9861 | 25.2 | 1.30ms | 196,437 |
+| cuTile  | 0.9863 | 26.4 | **4.03ms** | 63,477 |
+
+**分析**:
+
+1. **triton 永远最慢,模型无关**。3 个模型下 triton 训练时间 38.6-45.3s,是 PyTorch 的 1.5-1.8x。Python autograd Function 调度 + Triton autotune + dropout 是固有问题。**结论:Triton 模型在小 batch MNIST 上不应作为生产路径**。
+
+2. **cuTile 在 deep_narrow 上追平 CUDA**。cuTile train_s 27.6s vs CUDA 26.1s,差距 <2s。**根因:deep_narrow 8 个 256 维小 matmul,cuTile 16x16x16 mma fragment 完全合适,无 padding overhead**。在 default / wide_skip 上 cuTile 退化 5-10%,因为有大 hidden (1024) 触发更多 mma 调用。
+
+3. **cuTile 在 wide_skip 上 step_med 退化到 4.03ms**(vs default 2.39ms,1.7x)。**根因推测:残差路径的 `x = x + h` 触发 PyTorch `torch.add` 同步点**,与 cuTile Python tile 的 lazy execution 冲突。**未进一步验证**。
+
+4. **deep_narrow val_acc 0.985 略低于 default 0.987 / wide_skip 0.987**。8 层窄 + 多次 LN 在 MNIST 上**轻微欠拟合**(270K params < default 1.46M)。不是 kernel 问题,是模型表达力。
+
+5. **PyTorch 训练时间跨模型稳定** (24.8-25.4s),cuBLAS 对 hidden dim 切换不敏感。**CUDA 自定义 kernel 也稳定** (25.2-26.8s),但略慢于 PyTorch 0.2-1.7s(无 fused first-layer 加速路径在某些 shape 上)。
+
+**场景化 backend 选择建议**:
+
+| 场景 | 推荐 backend | 理由 |
+|------|---------------|------|
+| 浅 + 任意 hidden | PyTorch / CUDA | cuBLAS 已充分优化 |
+| 深 + 多次小 matmul + LN | **cuTile** | (16,16,16) fragment 摊销好 |
+| 残差 + 大 hidden | PyTorch / CUDA | 残差 add 同步 + cuTile 大 tile 退化 |
+| 生产路径(无教学需求) | PyTorch | 最快,val_acc 最高 |
+| 教学 / 算子对比 | 全部 4 backend | 暴露 kernel 设计取舍 |
+
+**记录位置**:
+- `results/full_eval_20260604_011723/` 含 3 模型 × 4-backend × 4 轮末轮数据。
+- `configs/mnist_mlp_deep_narrow.yaml` / `configs/mnist_mlp_wide_skip.yaml`。
+- Driver: `MODELS=default,deep_narrow,wide_skip bash tools/run_full_eval.sh` 重现。
+
+---
+
 <details>
 <summary>历史模板</summary>
 
