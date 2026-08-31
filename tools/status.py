@@ -82,7 +82,7 @@ def main():
     print(f"  MLP-Kernel-Lab v2 — 项目状态")
     print("=" * 66)
     print("  git   : %s @ %s (%s)" % (git["branch"], git["commit"], "dirty" if git["dirty"] else "clean"))
-    print("  测试  : %d 项 pytest *源码函数*（parametrize 展开后 ~136 用例，以 make reproduce 报告为准）" % total_tests)
+    print("  测试  : %d 项 pytest *源码函数*（parametrize 展开后 ~211 用例；以 make reproduce 报告为准）" % total_tests)
     if latest_manifest:
         print("  manifest: %s" % latest_manifest.relative_to(REPO))
     if latest_sweep:
