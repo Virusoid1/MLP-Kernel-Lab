@@ -244,7 +244,7 @@ SwiGLU MLP block，CUDA Event 计时（strict FP32 对照固化于 bench/run.py�
 
 > **结论**：fp16 正确性六后端全闭环（norm_l2 2.4e-4~6e-4）；性能上 triton 是 3070 主路径（vs eager-fp32 达 4.07x），
 > cuda/cutile 慢（wmma32/ct.mma tile 不敌 cuBLAS，诚实记录为后续优化）。完整数据在
-> `artifacts/swiglu_20260901-000320-prefill-*`（42-case sweep）。
+> `artifacts/swiglu_20260901-010220-prefill-*`（42-case sweep，新 cutile tile 归档）。
 
 ### decode 摊销（K=4096/F=11008, fp16, per-token）
 
