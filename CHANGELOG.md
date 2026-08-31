@@ -31,6 +31,16 @@
 - **fp16 SwiGLU-block 端到端训练**（新证据层）：`test_fp16_swiglu_block_training` 用 P1 可微 op（mlp_kernel::swiglu）学完整 block，loss 0.104→0.038（降 63%）
 - **终版档案**：测试规模 **212**（175 passed / 0 failed / 37 skipped）；all-suite fp16 266-case best 3.52x；数据一致性审计完成
 
+## 2026-09-01 v2 终局 — 证据闭环 + 可视化 + 全仓一致性（commit ccd2c75）
+
+**内容（RTX 3070, 2026-09-01）:**
+- **bf16 训练语义**（新证据层）：bf16 线性（eager/Triton）收敛 rel 0.015；**bf16 SwiGLU-block 需 AdamW**（SGD 慢 rel 0.78，AdamW 1500ep →0）——低精度小梯度被尾数截断的实证
+- **算子级基线补全**：fp32 conv/pool（conv2d triton 0.44x）、fp16 全尺寸（bias_add_relu 2048 1.30x）——E3 算子基线覆盖完整
+- **可视化交付**：`tools/plot_perf_figures.py` + `make figures`（decode 摊销/fp16 加速/roofline 86% 三图，README 嵌入）
+- **E4 就绪演练**：bundle 离线首次上手全链验证（clone→preflight→smoke→guard ALL OK）；`bench_cutile --tile-sweep`（cuTile tile 选择工具）
+- **一致性工具**：`tools/check_evidence.py`（+--doc-only 进 CI）、全仓计数 213（176p/0f/37s）零残留扫描
+- **性能复核**：decode 表统一当前 suite（M=1/4/16/32: 0.737/0.186/0.047/0.024ms），5 轮稳定性 1.94%/0.51%
+
 ## 2026-06-04 #1 — Triton matmul 64×64 + cuTile tile (16,16,16),per-op matmul 3-6x 提速
 
 **内容:**
