@@ -39,6 +39,7 @@ python bench/run.py --suite decode --dtypes fp16     # decode 档
 
 - 3070: 开发/正确性主战场 → 数字均带 manifest（artifacts/<run-id>/）
 - 3080 Ti/3090 Ti: 跑同一 make reproduce + 全 sweep，验证"同架构第二设备"一致性（E4 复现）
+- **E4 实操手册：[docs/e4-runbook.md](e4-runbook.md)**（事前准备→到机验证→全量复现→对比模板→Blackwell 注意）
 - 5070 Ti: 先跑 preflight + smoke（Blackwell portability），再独立 autotune cache（不做跨架构对数字）
 
 ## 已知环境注意事项
