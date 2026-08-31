@@ -9,6 +9,7 @@
 
 #include <torch/extension.h>
 #include <cuda_runtime.h>
+#include <cuda_fp16.h>
 #include <c10/cuda/CUDAStream.h>
 
 // 兼容不同 PyTorch 版本的 CUDA stream 获取
@@ -194,6 +195,7 @@ torch::Tensor matmul_half(torch::Tensor A, torch::Tensor B) {
     TORCH_CHECK(A.size(1) == B.size(0), "Shape mismatch: A(", M, ",", K, ") @ B(", B.size(0), ",", N, ")");
 
     auto C = torch::empty({M, N}, A.options());
+    // at::Half == __half (CUDA half); 直接 data_ptr 传 launch_matmul_half
     launch_matmul_half(
         reinterpret_cast<const half*>(A.data_ptr<at::Half>()),
         reinterpret_cast<const half*>(B.data_ptr<at::Half>()),
