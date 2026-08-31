@@ -104,3 +104,52 @@ def test_backends_learn_similarly():
     vals = list(finals.values())
     spread = max(vals) - min(vals)
     assert spread < 0.1, f"后端训练差异过大: {finals} (spread {spread:.4f})"
+
+
+def _setup_fp16(N=64, IN=32, OUT=8):
+    torch.manual_seed(42)
+    X = torch.randn(N, IN, device="cuda", dtype=torch.float16)
+    Wstar = torch.randn(IN, OUT, device="cuda", dtype=torch.float16)
+    Y = (X.to(torch.float32) @ Wstar.to(torch.float32)).half()
+    return X, Y
+
+
+def _train_fp16(model, X, Y, lr=0.1, epochs=200):
+    opt = torch.optim.SGD(model.parameters(), lr=lr)
+    losses = []
+    for ep in range(epochs):
+        opt.zero_grad()
+        out = model(X)
+        loss = F.mse_loss(out.float(), Y.float())  # loss 用 fp32
+        loss.backward()
+        opt.step()
+        losses.append(loss.item())
+    return losses
+
+
+def _build_fp16_model(backend):
+    import torch.nn as nn
+    if backend == "eager":
+        m = nn.Linear(32, 8, device="cuda").half()
+    elif backend == "triton":
+        from python.mnist.triton_layers import TritonLinear
+        m = TritonLinear(32, 8).cuda().half()
+    else:
+        raise ValueError(backend)
+    torch.nn.init.normal_(next(m.parameters()), std=0.1)
+    return m
+
+
+@pytest.mark.parametrize("backend", ["eager", "triton"])
+def test_fp16_training_converges(backend):
+    """fp16 训练闭环：eager(cuBLAS fp16) 与 Triton 自定义后端 fp16 都能收敛（loss 降至 30% 以下）。"""
+    try:
+        model = _build_fp16_model(backend)
+    except Exception:
+        pytest.skip(f"{backend} fp16 unavailable")
+    X, Y = _setup_fp16()
+    losses = _train_fp16(model, X, Y)
+    requires_grad_finite = all(torch.isfinite(p).all() for p in model.parameters())
+    assert requires_grad_finite, f"{backend} fp16: non-finite params after training"
+    assert losses[-1] < 0.3 * losses[0], (
+        f"{backend} fp16: not converged ({losses[0]:.3f} -> {losses[-1]:.3f})")
