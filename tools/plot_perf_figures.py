@@ -19,12 +19,22 @@ def load_bench(sub):
 
 # ---- Fig1: decode per-token amortization (log) ----
 rows = load_bench("034658-decode")
+m256 = ARTS / "decode_m256_fp16.json"
 if rows:
     tr = sorted([(r['M'], r['median_ms']/max(r['M'],1)) for r in rows if r['dtype']=='fp16' and r['backend']=='triton'], key=lambda x: x[0])
+    if m256.exists():
+        extra = json.loads(m256.read_text()).get("rows", [])
+        for e in extra:
+            if not any(x[0] == e["M"] for x in tr):
+                tr.append((e["M"], e["per_token_ms"]))
+        tr.sort(key=lambda x: x[0])
     if tr:
         ms_ = [x[0] for x in tr]; pts = [x[1] for x in tr]
         plt.figure(figsize=(7,4.5))
         plt.semilogy(ms_, pts, "o", label="triton fp16 per-token")
+        if m256.exists():
+            r1, r256 = [x[1] for x in tr if x[0] == 1][0], [x[1] for x in tr if x[0] == 256][0]
+            plt.text(0.75*max(ms_), 0.6*max(pts), "M1/M256 = %.0fx" % (r1/r256), fontsize=11, bbox=dict(facecolor="wheat", alpha=0.8))
         plt.xlabel("batch M (tokens)"); plt.ylabel("per-token ms (log)")
         plt.title("decode amortization: per-token cost sheds with batch (K=4096 F=11008)")
         plt.grid(True, which="both", alpha=0.3); plt.legend()
