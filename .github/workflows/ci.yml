@@ -1,0 +1,47 @@
+name: CI
+
+on:
+  push:
+    branches: [master, "v2-transformer-mlp"]
+  pull_request:
+    branches: [master]
+
+jobs:
+  # ---------- CPU-only 静态检查（无 GPU 需求，PR 必跑） ----------
+  cpu-static:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install deps (CPU torch for import/syntax)
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install pyyaml pytest
+          python -m pip install torch --index-url https://download.pytorch.org/whl/cpu
+      - name: Syntax check all .py
+        run: |
+          python -m compileall -q python triton_kernels cutile_kernels tests tools bench || exit 1
+      - name: pytest collect (no GPU needed)
+        run: |
+          python -m pytest tests/ --collect-only -q | tail -5
+      - name: Dataset/shape config sanity
+        run: |
+          python -c "import yaml; cfg=yaml.safe_load(open('bench/suites/transformer_mlp.yaml')); print('suite shapes:', sum(len(v) if isinstance(v,list) else 0 for v in cfg.values() if isinstance(v,list)))"
+  # ---------- 可选 GPU runner（手动触发或 GPU-tagged runner） ----------
+  gpu-full:
+    runs-on: [self-hosted, linux, gpu]  # 需要 GPU-tagged runner；无则跳过
+    if: ${{ github.repository_owner == 'Virusoid1' }}
+    needs: cpu-static
+    steps:
+      - uses: actions/checkout@v4
+      - name: Preflight (toolchain/lane check)
+        run: |
+          python tools/preflight.py --json || echo "preflight warnings (see above); GPU job continues for Triton-only"
+      - name: Full tests (GPU)
+        run: |
+          python -m pytest tests/ -q --tb=short || exit 1
+      - name: Reproducibility smoke
+        run: |
+          make reproduce PYTHON=python || true
