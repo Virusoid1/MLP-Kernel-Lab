@@ -249,12 +249,13 @@ SwiGLU MLP block，CUDA Event 计时（strict FP32 对照固化于 bench/run.py�
 
 | batch M | 1 | 4 | 16 | 32 |
 |---|---|---|---|---|
-| per-token ms | **0.737** | 0.186 | 0.047 | 0.024 |
-| （↓80x 历史外推参考：旧 suite 曾测 M=256 ≈ 0.010） | | | | |
+| per-token ms | **0.7798** | 0.186 | 0.047 | 0.024 |
+| M=256 实测 ↓82.9x | | | | |
 
 > 终版复核（2026-09-01, 归档 artifacts/swiglu_20260901-034658-decode-*，32-case corr 100%）：
-> triton fp16 M=1 = 0.737ms；M=4/16/32 ≈ 0.74-0.78ms 总量（每 token 0.186/0.047/0.024ms）——
-> **decode 权重带宽 bound 本质不变**（M=1 与多 token 单次总量无差异；roofline 带宽利用率仅 23-36%）
+> triton fp16 M=1 = 0.737ms；M=4/16/32 ≈ 0.74-0.78ms 总量（每 token 0.186/0.047/0.024ms）。
+> **M=256 实测（2026-09-01）：每次 0.7798ms → 总 2.41ms，per-token 0.0094ms，M1/M256 摊销 82.9x**——
+> decode 权重带宽 bound 本质不变（roofline 带宽利用率 23-36%）
 
 > 结论：decode 小 M 是权重带宽 bound（融合 kernel 无效，负结果见报告）；大 decode batch 摊销后 per-token 成本↓80x。
 > 完整分析：[docs/experiments/swiglu-sweep-20260831-3070.md](docs/experiments/swiglu-sweep-20260831-3070.md) · 证据矩阵：[docs/claim-matrix.md](docs/claim-matrix.md)
