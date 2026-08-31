@@ -1,4 +1,4 @@
-.PHONY: install test bench profile clean plots test-cuda test-python profile-nsys profile-ops bench-op bench-cu analyze gate preflight reproduce status bench-swiglu telemetry verify check-evidence
+.PHONY: install test bench profile clean plots test-cuda test-python profile-nsys profile-ops bench-op bench-cu analyze gate preflight reproduce status bench-swiglu telemetry verify check-evidence figures
 
 # Python 解释器（可覆盖：make test PYTHON=/path/to/venv/bin/python）
 PYTHON ?= python3
@@ -26,6 +26,10 @@ verify:
 # 证据一致性守卫：文档数字 <-> 最新 manifest 自动校对（CI / 复现后跑）
 check-evidence:
 	$(PYTHON) tools/check_evidence.py
+
+# 从归档数据生成性能图（decode 摊销 / fp16 加速 / roofline）→ figures/
+figures:
+	$(PYTHON) tools/plot_perf_figures.py
 
 # preflight: 多机 lane 检测（Ampere 8.6 / Blackwell 12.0）+ 工具链一致性 + 构建建议
 preflight:
