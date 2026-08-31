@@ -183,7 +183,7 @@
 - `CMakeLists.txt`：`CMAKE_CUDA_ARCHITECTURES` 从 `80` 改为 `86;120`
 
 **验证：**
-- 全部 55 项 Python 测试通过（Triton 21 + CUDA 16 + cuTile 18）
+- 全部 55 项 Python 测试通过（Triton 21 + CUDA 16 + cuTile 18）※历史快照；当前以 make reproduce 报告为准
 - Ampere 路径无回归（RTX 3070 Laptop 验证）
 
 ## 2026-05-27 #1 — cuTile Python 算子实现 + 四后端对比
@@ -203,7 +203,7 @@
 
 **验证：**
 - 18 项 cuTile 测试全部通过
-- 全部 55 项 Python 测试通过（Triton 21 + CUDA 16 + cuTile 18）
+- 全部 55 项 Python 测试通过（Triton 21 + CUDA 16 + cuTile 18）※历史快照；当前以 make reproduce 报告为准
 - cuTile MLP 前向/反向传播正常，梯度无 NaN/Inf
 
 ## 2026-05-26 #4 — LayerNorm 实现 + 测试完善
