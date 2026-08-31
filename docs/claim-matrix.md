@@ -29,6 +29,7 @@
 | 精度控制 TF32/FP32 全局切换，多后端公平对比 | `triton_kernels/precision.py`、`run_compare.py --precision`、`benchmark_ops.py --precision/--ref-tf32` | 旧 `results/baseline.json` 为 tf32；`--ref-tf32` 可切 ref | 实现存在 | E1 |
 | 统一算子级 benchmark 入口 | `benchmark_ops.py`（唯一权威入口；`bench/` 已删除） | `make bench` / `make bench-quick` / `make test` → `benchmark_ops.py` | 已统一（比 v2 计划预期的更早完成） | E2 |
 | 算子级 fp16 sweep（2026-09-01, 全 sizes 归档 results/op_bench_20260901_001150.json） | Triton elementwise（bias_add_relu 等）fp16 正确且 2048-size 达 1.30x；**CUDA swiglu/softmax 等算子 fp16 仍被 binding float32 硬检查阻塞**（仅 matmul 有 matmul_half） | 记录边界：算子级 CUDA fp16 缺口不影响 v2 块级主线（块级已六后端闭环） | E2 |
+| 算子级 fp32 终版对照基线（2026-09-01, 全 sizes 归档 results/op_bench_20260901_003415.json） | **Triton avg 1.44x（min 0.34 / max 3.77）**，**CUDA avg 2.15x（min 0.11 / max 7.33）**；softmax 误差 1e-7 | fp32 算子级基线固化：Triton 稳赢多数算子，CUDA 强在部分算子但大 shape matmul 拖累（0.11x，已知） | E3(基线) |
 | Manifest 元数据（GPU/driver/cuda/torch/triton/cutile/git_dirty） | `capture_metadata()`（已补 triton/cutile/nvcc/git_dirty 字段）+ `export_json()`；`tools/reproduce.py` 一键归档 | `artifacts/20260831-194320-9a265d4-.../manifest.json`（136 tests, 124 passed） | **Manifest 完整，可追溯** | E3 |
 | 测量-分析-优化闭环 | `Makefile bench-op/analyze/gate`、`tools/analyze_bench.py`、`tools/run_full_eval.sh`、`tools/gpu_warmup.py` | `results/baseline*.json` + CHANGELOG 编号条目 | 已存在 | E2 |
 | Nsight workflow | `profiling/run_ncu.sh`（rewrite, 与已删 `bench/` 解耦）、`profile_nsys.sh`、`profile_ops.py` | `CHANGELOG` 记录 ncu 使用（wmma64 / launch_bounds 定位） | 实现存在 | E2 |
