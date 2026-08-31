@@ -9,7 +9,7 @@
 
 | Claim | Evidence Path | Status | Level |
 |---|---|---|---|
-| 全量测试通过 | `make reproduce`（commit 319e572, 2026-09-01）→ `artifacts/20260901-024047-319e572-*/manifest.json` | **212 tests: 175 passed / 0 failed / 37 skipped**（含 fp16 SwiGLU-block 训练） | E2 |
+| 全量测试通过 | `make reproduce`（commit 66cf3c1, 2026-09-01）→ `artifacts/20260901-025730-66cf3c1-*/manifest.json` | **212 tests: 175 passed / 0 failed / 37 skipped**（含 fp16 SwiGLU-block 训练） | E2 |
 | 55 原始算子测试 | `tests/test_{triton,cuda,cutile}_kernels.py` | passed（并入 209 全量） | E2 |
 | SwiGLU block 六后端正确性 | `tests/test_transformer_mlp.py`（DTYPE_SUPPORT 矩阵） | fp16: 六后端闭环（corr 100%）| E2 |
 | 算子级 dtype 矩阵 | `tests/test_dtype_support_matrix.py`（执行式探测） | 20 passed / blocked-skips 记录边界 | E2 |

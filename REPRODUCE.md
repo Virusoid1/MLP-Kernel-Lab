@@ -60,7 +60,7 @@ python scripts/gpu_telemetry.py --cmd "python bench/run.py --suite prefill --dty
 python tools/preflight.py
 ```
 
-## 3. 预期结果（3070 Laptop, 2026-09-01, commit 4523a4a）
+## 3. 预期结果（3070 Laptop, 2026-09-01, commit 66cf3c1）
 
 | 项 | 预期 |
 |---|---|

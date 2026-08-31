@@ -19,7 +19,7 @@
 - **P1 torch.library**：`mlp_kernel::swiglu` schema/meta/autograd/opcheck/gradcheck/compile 全通过（8 tests）
 - **多机代码**：`tools/preflight.py`（Ampere/Blackwell lane）+ `docs/compatibility-matrix.md` + setup build_base 隔离 + `scripts/verify.sh` + **git bundle 离线同步**（绕 GFW）
 - **交付包**：`EVIDENCE.md`（claim→evidence→level + 30s/3min/15min）、`KNOWN-LIMITATIONS.md`、`docs/fp16-delivery-status.md`
-- **测试规模** 136→**211**（174 passed / 0 failed / 37 skipped，含算子矩阵/P1/训练/fp16）
+- **测试规模** 136→**211**（174 passed / 0 failed / 37 skipped）※历史快照；后续含 SwiGLU-block 训练＝**212**（当前以 make reproduce 为准）
 
 ## 2026-09-01 v2 Phase-2 收尾 — 交付完善（commit 525db06）
 
