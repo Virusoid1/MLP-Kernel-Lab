@@ -6,6 +6,10 @@
 >
 > 证据等级（沿用 `resume/interview-prep/.../10-project-experiment-roadmap.md`）：
 > E0 计划 / E1 实现 / E2 正确性（当前环境测试+reference+边界）/ E3 性能（协议+raw data+profiles）/ E4 复现（第二设备/独立脚本）。
+>
+> **当前验证环境（2026-07，RTX 3070 Laptop）**：Python 3.12.3 / torch 2.11.0+cu130 / Triton 3.6.0 /
+> pytest 9.0.3 / cuda-tile 1.3.0（= `cuda.tile`）/ driver 610.88 / CUDA 13.2 / venv=~/projects/Salvation-Lies-Within/venv。
+> 四后端全部可 import，55 项 Python 测试实测通过。
 
 ## 说明（本文件的前提）
 
@@ -19,7 +23,7 @@
 |---|---|---|---|---|
 | 三个自定义 GPU 后端（Triton / CUDA / cuTile）可 import | `triton_kernels/`、`kernels/mlp/*.cu` + `setup.py`、`cutile_kernels/` | 未在当前环境复跑（缺 pytest/GPU 复验） | 实现存在，未复核 | E1 |
 | 四后端 FP32 精度对齐 98.52%–98.71% | CHANGELOG 2026-06-03 #1（wmma64 修复后 15-epoch） | `results/compare_20260602_235625.json`（5070 Ti 实测），README 完整 4-backend 实测小节 | 历史结果（RTX 5070 Ti），当前 GPU 未复跑 | E3(5070 Ti) / 未复现 |
-| 55 项 Python + 6 项 C++ 测试通过 | `tests/test_triton_kernels.py` / `test_cuda_kernels.py` / `test_cutile_kernels.py` / `test_kernels.cu` | **实际 pytest 函数数 = 18 + 13 + 15 = 46**（README 写 55 已过时）；当前环境缺 pytest → 未复跑 | 测试数量需以真实报告为准，不沿用 55 | E1 |
+| 测试通过 | `tests/test_triton_kernels.py` / `test_cuda_kernels.py` / `test_cutile_kernels.py` / `test_kernels.cu` | **55 passed in 19.21s（2026-07 RTX 3070 Laptop, venv=Salvation-Lies-Within, pytest 9.0.3, torch 2.11.0+cu130）**。55 = parametrize 展开后用例数（源码 def 函数为 18+13+15=46，parametrize 展开后 55）。cuTile 15 项全部真通过（cuda.tile 1.3.0 已装） | 已复跑通过；C++ test_kernels 未跑（需 nvcc 手动） | E2 |
 | 精度控制 TF32/FP32 全局切换，多后端公平对比 | `triton_kernels/precision.py`、`run_compare.py --precision`、`benchmark_ops.py --precision/--ref-tf32` | 旧 `results/baseline.json` 为 tf32；`--ref-tf32` 可切 ref | 实现存在 | E1 |
 | 统一算子级 benchmark 入口 | `benchmark_ops.py`（唯一权威入口；`bench/` 已删除） | `make bench` / `make bench-quick` / `make test` → `benchmark_ops.py` | 已统一（比 v2 计划预期的更早完成） | E2 |
 | Manifest 元数据（GPU/driver/torch/git） | `python/mnist/benchmark.py::capture_metadata()` + `benchmark_ops.py::export_json()`（`{metadata, rows}` schema） | `results/baseline.json`（5070 Ti, git_sha=8991e9d） | 部分实现；**缺 triton/cutile/nvcc 版本、git_dirty、raw samples** | E3 雏形 |
