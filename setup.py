@@ -7,6 +7,7 @@
 """
 
 import os
+import platform
 
 import torch
 from setuptools import setup
@@ -46,6 +47,13 @@ def _gencode_flags(arch_list: list[str]) -> list[str]:
 # 构建时暴露给外部工具（make check / preflight 可复用）
 CUDA_ARCH_LIST = _detect_arch_list()
 
+# 构建目录按 环境+架构 隔离: build/py<MAJOR><MINOR>-torch<X>-sm<CC>/
+# 避免 Ampere/Blackwell 或不同 Python 的产物互相污染（v2 多机代码）。
+_py = f"py{platform.python_version_tuple()[0]}{platform.python_version_tuple()[1]}"
+_torch_ver = torch.__version__.split("+")[0]
+_cc = (CUDA_ARCH_LIST[0] if CUDA_ARCH_LIST else "8.6").replace(".", "")
+_build_dir = f"build/{_py}-torch{_torch_ver}-sm{_cc}"
+
 setup(
     name='mlp_cuda',
     ext_modules=[
@@ -75,6 +83,11 @@ setup(
     ],
     cmdclass={
         'build_ext': BuildExtension,
+    },
+    # 构建产物按 环境+架构 隔离（多机: build/py312-torch2.11.0-8.6 / ...-12.0）
+    # build_base 会折叠 build/lib.* 与 build/temp.* 到该目录下
+    options={
+        'build': {'build_base': _build_dir},
     },
     python_requires='>=3.8',
 )
