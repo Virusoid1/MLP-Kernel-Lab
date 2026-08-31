@@ -243,6 +243,47 @@ def bench_mlp(rounds: int, warmup_iters: int, measure_iters: int) -> dict:
 
 
 # ============================================================
+# cuTile matmul tile sweep（E4 / Blackwell 选 tile）
+# ============================================================
+
+TILE_CANDIDATES = [(16, 16, 16), (32, 32, 32), (32, 64, 32), (64, 64, 32),
+                   (32, 32, 64), (64, 32, 32), (128, 64, 32)]
+
+
+def tile_sweep_matmul(M, K, N, rounds, warmup, iters) -> tuple:
+    """对 cutile matmul 测多种 TM/TN/TK，返回 (best_tile, ms, table)。
+
+    通过 monkeypatch triton_kernels.gpu_utils.get_arch_params 的
+    cutile_matmul_tile 字段实现（gpu_utils 内部有模块级缓存，逐 tile 打补丁）。
+    """
+    import triton_kernels.gpu_utils as gu
+    from cutile_kernels.matmul import cutile_matmul
+    a = torch.randn(M, K, device="cuda")
+    b = torch.randn(K, N, device="cuda")
+    best = None
+    table = []
+    orig = gu.get_arch_params
+    for T in TILE_CANDIDATES:
+        def fake(T_=T):
+            d = dict(orig())
+            d["cutile_matmul_tile"] = T_
+            return d
+        gu.get_arch_params = fake
+        try:
+            res = bench("tilesweep", lambda: cutile_matmul(a, b), rounds, warmup, iters)
+            ms = res["mean_last_3_ms"]  # 丢第 1 轮的均值，与 bench_cutile 全脚本一致
+        except Exception as e:
+            ms = None
+            print(f"  tile={T} FAIL {str(e)[:40]}")
+        if ms is not None:
+            table.append((T, ms))
+            if best is None or ms < best[1]:
+                best = (T, ms)
+    gu.get_arch_params = orig
+    return best, table
+
+
+# ============================================================
 # 主入口
 # ============================================================
 
@@ -261,10 +302,24 @@ def main():
     parser.add_argument("--output", type=str, default="results/cutile_bench.json")
     parser.add_argument("--skip-mlp", action="store_true",
                         help="只跑算子, 跳过 MLP 端到端")
+    parser.add_argument("--tile-sweep", action="store_true",
+                        help="对 cutile matmul 做 tile 单变量 sweep（E4/Blackwell 选 tile）")
     args = parser.parse_args()
 
     ops = precheck()
     gpu_warmup(args.gpu_warmup_secs)
+
+    tile_sweep_result = None
+    if args.tile_sweep:
+        print(f"\n=== cuTile matmul tile sweep (M={args.M} K={args.K} N={args.N}) ===")
+        best, table = tile_sweep_matmul(args.M, args.K, args.N,
+                                        args.rounds, args.warmup, args.iters)
+        tile_sweep_result = {"best_tile": list(best[0]), "best_ms": best[1],
+                             "table": [[list(t), ms] for t, ms in table]}
+        print(f"  best tile: {best[0]} at {best[1]:.4f} ms")
+        for t, ms in table:
+            mark = " <--" if t == best[0] else ""
+            print(f"    {t}  {ms:.4f} ms{mark}")
 
     print(f"\n=== Per-op benchmark (M={args.M} K={args.K} N={args.N}) ===")
     op_results = bench_ops(ops, args.M, args.K, args.N,
@@ -300,6 +355,7 @@ def main():
         },
         "ops": op_results,
         "mlp": mlp_results,
+        "tile_sweep": tile_sweep_result,
     }
 
     # ---- 打印表格 ----
