@@ -126,6 +126,7 @@ def tiled_matmul_kernel(
 
     a_ptrs = a_ptr + offs_m[:, None] * stride_am + offs_k[None, :] * stride_ak
     b_ptrs = b_ptr + offs_k[:, None] * stride_bk + offs_n[None, :] * stride_bn
+    # FP16/BF16 输入走 tl.dot 时累加器保持 FP32（标准做法），避免同 dtype 限制
     acc = tl.zeros((BLOCK_M, BLOCK_N), dtype=tl.float32)
 
     for k_start in range(0, K, BLOCK_K):
@@ -133,7 +134,12 @@ def tiled_matmul_kernel(
 
         a = tl.load(a_ptrs, mask=m_mask & k_mask[None, :], other=0.0)
         b = tl.load(b_ptrs, mask=k_mask[:, None] & n_mask, other=0.0)
-        acc += tl.dot(a, b, allow_tf32=ALLOW_TF32)
+        # fp16/bf16: 三参 dot 带 fp32 累加器（输入低精度，输出高精度）
+        # fp32: 保持二参 dot + FP32 累加（原路径，避免三参语义差异）
+        if a.dtype == tl.float32:
+            acc += tl.dot(a, b, allow_tf32=ALLOW_TF32)
+        else:
+            acc = tl.dot(a, b, acc, input_precision="ieee" if not ALLOW_TF32 else "tf32")
 
         a_ptrs += BLOCK_K * stride_ak
         b_ptrs += BLOCK_K * stride_bk
@@ -153,7 +159,7 @@ def tiled_matmul(a: torch.Tensor, b: torch.Tensor) -> torch.Tensor:
     M, K = a.shape
     _, N = b.shape
 
-    c = torch.empty((M, N), device=a.device, dtype=torch.float32)
+    c = torch.empty((M, N), device=a.device, dtype=a.dtype)
 
     # autotune 会自动选择 BLOCK_M/N/K 和 GROUP_SIZE_M
     # 这里传默认值，autotune 装饰器会覆盖

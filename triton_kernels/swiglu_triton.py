@@ -36,9 +36,11 @@ def swiglu_kernel(
     gate = tl.load(gate_ptr + offsets, mask=mask, other=0.0)
     up = tl.load(up_ptr + offsets, mask=mask, other=0.0)
 
-    sigmoid_gate = tl.sigmoid(gate)
-    silu_gate = gate * sigmoid_gate
-    output = silu_gate * up
+    # Triton tl.sigmoid 只支持 fp32/fp64：低精度输入提升到 fp32 计算再回落
+    gate_f32 = gate.to(tl.float32)
+    sigmoid_gate = tl.sigmoid(gate_f32)
+    silu_gate = gate_f32 * sigmoid_gate
+    output = silu_gate.to(gate.dtype) * up
 
     tl.store(output_ptr + offsets, output, mask=mask)
 

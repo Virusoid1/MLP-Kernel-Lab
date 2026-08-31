@@ -121,7 +121,7 @@ def test_swiglu_block_equals_reference(M, K, F, backend):
 #   cutile               : ct.mma 要求 x/y 同 dtype；当前只验证 FP32
 DTYPE_SUPPORT = {
     ("eager", torch.float32): True, ("eager", torch.float16): "overflow", ("eager", torch.bfloat16): "unverified",
-    ("triton", torch.float32): True, ("triton", torch.float16): "unverified", ("triton", torch.bfloat16): "dot-mixed-dtype",
+    ("triton", torch.float32): True, ("triton", torch.float16): True, ("triton", torch.bfloat16): True,
     ("cuda", torch.float32): True, ("cuda", torch.float16): "fp32-only", ("cuda", torch.bfloat16): "fp32-only",
     ("cutile", torch.float32): True, ("cutile", torch.float16): "mma-mixed", ("cutile", torch.bfloat16): "mma-mixed",
 }
