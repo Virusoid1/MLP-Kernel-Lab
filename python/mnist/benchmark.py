@@ -82,6 +82,57 @@ def _cudnn_version() -> str:
         return "n/a"
 
 
+def _git_dirty() -> bool:
+    """工作树是否有未提交改动（影响结果可复现性判断）。"""
+    try:
+        out = subprocess.run(
+            ["git", "status", "--porcelain"],
+            capture_output=True, text=True, timeout=2.0,
+        )
+        return out.returncode == 0 and bool(out.stdout.strip())
+    except Exception:
+        return True  # 无法确认时保守视为 dirty
+
+
+def _triton_version() -> str:
+    try:
+        import triton
+        return getattr(triton, "__version__", "unknown")
+    except Exception:
+        return "not-installed"
+
+
+def _cutile_version() -> str:
+    """cuda-tile (cuTile) 版本；未安装时返回 not-installed。"""
+    try:
+        import cuda_tile  # noqa: F401
+        import importlib.metadata as im
+        return im.version("cuda-tile")
+    except Exception:
+        return "not-installed"
+
+
+def _cuda_versions() -> dict:
+    """nvcc / CUDA Runtime / cuDNN 版本，统一到一个 dict。"""
+    cuda = {"nvcc": "n/a", "runtime": "n/a"}
+    try:
+        out = subprocess.run(
+            ["nvcc", "--version"], capture_output=True, text=True, timeout=2.0,
+        )
+        if out.returncode == 0:
+            for line in out.stdout.splitlines():
+                if "release" in line.lower():
+                    cuda["nvcc"] = line.strip()
+                    break
+    except Exception:
+        pass
+    try:
+        cuda["runtime"] = torch.version.cuda or "n/a"
+    except Exception:
+        pass
+    return cuda
+
+
 def capture_metadata(args=None) -> dict:
     """收集 GPU / 驱动 / 框架 / 配置 / git / 时间戳, 嵌入到 JSON 结果顶部。
 
@@ -90,11 +141,15 @@ def capture_metadata(args=None) -> dict:
     md = {
         "gpu": _gpu_info(),
         "driver": _driver_version(),
+        "cuda": _cuda_versions(),
         "torch": torch.__version__,
+        "triton": _triton_version(),
+        "cutile": _cutile_version(),
         "cudnn": _cudnn_version(),
         "allow_tf32_matmul": bool(torch.backends.cuda.matmul.allow_tf32),
         "allow_tf32_cudnn": bool(torch.backends.cudnn.allow_tf32),
         "git_sha": _git_sha(short=True),
+        "git_dirty": _git_dirty(),
         "timestamp": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
         "hostname": platform.node(),
         "python": platform.python_version(),

@@ -11,7 +11,7 @@
 - **精度控制**：TF32 / FP32 全局切换，多后端公平对比
 - **LayerNorm**：Triton + CUDA + cuTile 三端实现，forward + backward
 - **autograd 集成**：TritonLinear/CUDALinear/CUTILELinear 等 `torch.autograd.Function` 层，可直接嵌入 PyTorch 训练循环
-- **完整测试**：55 项 Python 测试 + 6 项 C++ CUDA 测试
+- **完整测试**：46 项 Python 测试函数（Triton 18 + CUDA 13 + cuTile 15）+ 6 项 C++ CUDA 测试（需当前环境复跑确认通过数，见 docs/claim-matrix.md）
 - **Nsight Compute profiling** & Chrome trace 导出
 
 ## 项目结构
@@ -66,9 +66,9 @@ MLP-Kernel-Lab/
 │   ├── benchmark.py            #   CUDA Event 精确基准测试
 │   └── dashboard.py            #   控制台输出 & JSON 导出
 ├── tests/                      # 测试
-│   ├── test_triton_kernels.py  #   21 项 Triton kernel 正确性测试
-│   ├── test_cuda_kernels.py    #   16 项 CUDA kernel 正确性测试
-│   ├── test_cutile_kernels.py  #   18 项 cuTile kernel 正确性测试
+│   ├── test_triton_kernels.py  #   18 项 Triton kernel 正确性测试
+│   ├── test_cuda_kernels.py    #   13 项 CUDA kernel 正确性测试
+│   ├── test_cutile_kernels.py  #   15 项 cuTile kernel 正确性测试
 │   └── test_kernels.cu         #   6 项 C++ CUDA 单元测试
 ├── configs/
 │   └── mnist_mlp.yaml          # MNIST 训练配置
@@ -142,7 +142,7 @@ python benchmark_ops.py --precision fp32 --warmup 20 --iters 100
 ### 测试
 
 ```bash
-make test-python       # Python 测试（55 项）
+make test-python       # Python 测试（46 项函数，通过数以 pytest 报告为准）
 make test-cuda         # C++ CUDA 测试（6 项）
 ```
 
@@ -199,6 +199,10 @@ Makefile 短路:`make profile-tiled` / `make profile-nsys` / `make profile-ops` 
 ## 性能参考
 
 FP32 模式，模型 `[784,1024,512,256,10]`，ReLU + LayerNorm + Dropout=0.1，15 epochs：
+
+> ⚠️ **此表为 legacy 参考（无 manifest）**：未记录 GPU/驱动/torch 版本，训练时长远高于下方 RTX 5070 Ti
+> 实测表（89.9s vs 27.4s，量级差异说明设备/协议不同）。**不作为当前性能主张**，仅供历史对照；
+> 当前性能请以"完整 4-backend 实测 (RTX 5070 Ti, ...)"小节及 `experiments/` 新实验目录为准。
 
 | 指标 | PyTorch | Triton | CUDA | cuTile |
 |------|---------|--------|------|--------|

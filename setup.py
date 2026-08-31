@@ -1,5 +1,50 @@
+"""CUDA extension 构建配置（v2：动态架构探测，不再硬编码 sm_86/sm_120）。
+
+架构来源优先级：
+1. 环境变量 TORCH_CUDA_ARCH_LIST（如 "8.6" / "12.0" / "8.6;12.0" / "8.6+PTX"）— 显式指定，跨机器可移植；
+2. 运行时 torch.cuda.get_device_capability() — 当前 GPU；
+3. 兜底 Ampere "8.6"（主开发机 RTX 3070 Laptop）。
+"""
+
+import os
+
+import torch
 from setuptools import setup
 from torch.utils.cpp_extension import BuildExtension, CUDAExtension
+
+
+def _detect_arch_list() -> list[str]:
+    """返回架构列表，元素形如 "8.6" 或 "8.6+PTX"。"""
+    env = os.environ.get("TORCH_CUDA_ARCH_LIST", "").strip()
+    if env:
+        parts = [p.strip() for p in env.replace(";", ",").split(",") if p.strip()]
+        archs = [p for p in parts if p.split("+")[0].strip()[:1].isdigit()]
+        if archs:
+            return archs
+    if torch.cuda.is_available():
+        major, minor = torch.cuda.get_device_capability(0)
+        return [f"{major}.{minor}"]
+    return ["8.6"]
+
+
+def _gencode_flags(arch_list: list[str]) -> list[str]:
+    """把 ["8.6", "12.0+PTX"] 转成 nvcc -gencode 参数。"""
+    flags: list[str] = []
+    for entry in arch_list:
+        name, _, ptx = entry.partition("+")
+        cc = name.strip().replace(".", "")
+        if not cc.isdigit():
+            continue
+        flags.append(f"-gencode=arch=compute_{cc},code=sm_{cc}")
+        if ptx.strip().upper() == "PTX":
+            flags.append(f"-gencode=arch=compute_{cc},code=compute_{cc}")
+    if not flags:
+        raise RuntimeError("无法从 TORCH_CUDA_ARCH_LIST 解析任何架构: %r" % (arch_list,))
+    return flags
+
+
+# 构建时暴露给外部工具（make check / preflight 可复用）
+CUDA_ARCH_LIST = _detect_arch_list()
 
 setup(
     name='mlp_cuda',
@@ -23,8 +68,7 @@ setup(
                 'nvcc': [
                     '-O3',
                     '--use_fast_math',
-                    '-gencode=arch=compute_86,code=sm_86',
-                    '-gencode=arch=compute_120,code=sm_120',
+                    *_gencode_flags(CUDA_ARCH_LIST),
                 ],
             },
         ),

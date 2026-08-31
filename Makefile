@@ -4,15 +4,19 @@
 test-python:
 	python -m pytest tests/ -v
 
+# 当前 GPU compute capability（与 setup.py 同一策略；可被 TORCH_CUDA_ARCH_LIST 覆盖）
+CUDA_ARCH ?= $(shell python -c "import torch; print(f'{torch.cuda.get_device_capability(0)[0]}{torch.cuda.get_device_capability(0)[1]}')" 2>/dev/null || echo 86)
+GENCODE = -gencode=arch=compute_$(CUDA_ARCH),code=sm_$(CUDA_ARCH)
+
 # C++ CUDA 测试
 test-cuda: build/test_kernels
-	@echo "Running CUDA C++ tests..."
+	@echo "Running CUDA C++ tests... (arch=$(CUDA_ARCH))"
 	./build/test_kernels
 
 build/test_kernels: tests/test_kernels.cu
 	@mkdir -p build
 	nvcc -O3 -o $@ $< --use_fast_math \
-		-gencode=arch=compute_86,code=sm_86
+		$(GENCODE)
 
 # 安装 CUDA extension
 install:
