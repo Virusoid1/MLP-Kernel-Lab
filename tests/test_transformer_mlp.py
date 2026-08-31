@@ -107,15 +107,21 @@ def test_swiglu_block_equals_reference(M, K, F, backend):
 @pytest.mark.parametrize("dtype", DTYPES)
 @pytest.mark.parametrize("backend", ["eager", "triton", "cuda", "cutile"])
 def test_swiglu_block_dtype_consistent(M, K, F, dtype, backend):
-    """FP16/BF16: 后端 vs 同 dtype eager（同一数据，容差按 dtype）"""
+    """FP16/BF16: 后端 dtype 输出 vs 同一数据的 FP32 reference（FP32 是唯一权威 reference）。
+
+    reference 必须独立于被测 dtype —— 否则 dtype 自身的 NaN/溢出会被 reference 继承而掩盖。
+    """
     x, wg, wu, wd = _make_case(M, K, F, dtype)
-    ref = swiglu_block_eager(x, wg, wu, wd)
+    # 输入转 FP32 求权威 reference
+    ref = swiglu_block_eager(x.float(), wg.float(), wu.float(), wd.float())
+    assert torch.isfinite(ref).all(), f"reference not finite for {dtype}"
     fn = BACKENDS.get(backend)
     if fn is None or backend not in available_backends():
         pytest.skip(f"{backend} unavailable")
     out = fn(x, wg, wu, wd)
-    # 归一化 L2：dtype 噪声整体可控；max_abs 会因个别大值放大，不作为判据
-    tol = 5e-3 if dtype == torch.float16 else 1e-2  # bf16 位宽更粗
+    assert torch.isfinite(out).all(), f"{backend} {dtype} produced non-finite output"
+    # 归一化 L2：dtype 精度边界（fp16 累加/bf16 尾数），个别大值放大不判据
+    tol = 2e-2 if dtype == torch.float16 else 3e-2  # 含 matmul 累加误差
     err = _norm_l2_err(out, ref)
     assert err < tol, f"{backend} {dtype} M={M} norm_l2={err:.3e}"
 
