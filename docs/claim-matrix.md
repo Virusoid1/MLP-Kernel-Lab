@@ -24,7 +24,8 @@
 |---|---|---|---|---|
 | 三个自定义 GPU 后端（Triton / CUDA / cuTile）可 import + 正确性 | `triton_kernels/`、`kernels/mlp/*.cu` + `setup.py`、`cutile_kernels/` | **已在 RTX 3070 复跑：55 项原始算子测试 + SwiGLU block 测试全绿**（136 项中 124 passed / 12 dtype-skip） | 已验证 import + 正确性 | E2 |
 | 四后端 FP32 精度对齐 98.52%–98.71% | CHANGELOG 2026-06-03 #1（wmma64 修复后 15-epoch） | `results/compare_20260602_235625.json`（5070 Ti 实测），README 完整 4-backend 实测小节 | 历史结果（RTX 5070 Ti），当前 GPU 未复跑 | E3(5070 Ti) / 未复现 |
-| 测试通过 | `tests/test_triton_kernels.py` / `test_cuda_kernels.py` / `test_cutile_kernels.py` / `test_kernels.cu` | **55 passed in 19.21s（2026-07 RTX 3070 Laptop, venv=Salvation-Lies-Within, pytest 9.0.3, torch 2.11.0+cu130）**。55 = parametrize 展开后用例数（源码 def 函数为 18+13+15=46，parametrize 展开后 55）。cuTile 15 项全部真通过（cuda.tile 1.3.0 已装） | 已复跑通过；C++ test_kernels 未跑（需 nvcc 手动） | E2 |
+| 测试通过 | `tests/test_*.py` 全量（原算子 55 + SwiGLU + dtype 矩阵 + P1 + 训练闭环） | **make reproduce：157 tests（142 passed / 0 failed / 15 skipped，2026-08-31 归档）**；SwiGLU/backward/P1/训练闭环各套测试分别全绿（含 dtype 矩阵 20 passed） | 已复跑通过；C++ test_kernels 未跑（需手动 nvcc） | E2 |
+| 训练语义保持（辅线） | `tests/test_training_loop.py`：同一线性回归下 pytorch/triton/cuda（仓库 autograd 层）训练 | **三后端 loss 同步收敛**：27.66→2.33 / 27.61→2.29 / 27.29→2.32（rel 0.083-0.085）；梯度全 finite | **训练对齐已证（3070）** | E2 |
 | 精度控制 TF32/FP32 全局切换，多后端公平对比 | `triton_kernels/precision.py`、`run_compare.py --precision`、`benchmark_ops.py --precision/--ref-tf32` | 旧 `results/baseline.json` 为 tf32；`--ref-tf32` 可切 ref | 实现存在 | E1 |
 | 统一算子级 benchmark 入口 | `benchmark_ops.py`（唯一权威入口；`bench/` 已删除） | `make bench` / `make bench-quick` / `make test` → `benchmark_ops.py` | 已统一（比 v2 计划预期的更早完成） | E2 |
 | Manifest 元数据（GPU/driver/cuda/torch/triton/cutile/git_dirty） | `capture_metadata()`（已补 triton/cutile/nvcc/git_dirty 字段）+ `export_json()`；`tools/reproduce.py` 一键归档 | `artifacts/20260831-194320-9a265d4-.../manifest.json`（136 tests, 124 passed） | **Manifest 完整，可追溯** | E3 |
