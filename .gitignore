@@ -13,8 +13,13 @@ build/
 *.exe
 *.out
 *.ncu-rep
+*.nsys-rep
+*.sqlite
 *.so
 *.bak
+
+# profiling binary outputs (not source)
+profiling/example_kernel
 
 # Data & Results
 data/
