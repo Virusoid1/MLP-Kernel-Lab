@@ -22,7 +22,6 @@ telemetry:
 # 其它机器快速验证（= scripts/verify.sh）：preflight->smoke->tests->bench(热采集)->status
 verify:
 	bash scripts/verify.sh $(PYTHON)
-	$(PYTHON) tools/status.py
 
 # preflight: 多机 lane 检测（Ampere 8.6 / Blackwell 12.0）+ 工具链一致性 + 构建建议
 preflight:
