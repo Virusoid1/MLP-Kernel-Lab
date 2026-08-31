@@ -9,6 +9,18 @@
 - **E3 基线归档**：228/152-case sweep 带 manifest；first decode 融合 kernel 负结果（带宽 bound）+ cuda WMMA 精度取舍根因
 - 测试规模 55→136（SwiGLU 用例加入）
 
+## 2026-09-01 v2 Phase-2 — fp16 六后端闭环 + P1 集成 + 多机代码 + 交付包
+
+**内容（RTX 3070, commit 55dc2fe）:**
+- **cuda fp16 解锁**：`kernels/mlp/matmul_half.cu`（fp16 WMMA in→fp32 acc→fp16 out, L2 2e-4），破除历史注释"L2 0.75 不可修"之谜（实为 fp16 正常精度）；`swiglu_block_cuda` fp16 分支
+- **fp16 六后端正确性闭环**：eager/triton/triton_fused/cuda/cutile/compile 42-case sweep corr 100%；cutile 经 dtype 传播修复（matmul 恒输出 fp32→段间 recast）
+- **cutile tile 优化**：ampere (32,32,32)→(32,64,32)，cutile matmul 1.5-1.6x（tile 单变量实验）
+- **fp16 训练闭环**：eager(cuBLAS fp16) 与 Triton fp16 均收敛（rel<0.005），`tests/test_training_loop.py` 新增
+- **P1 torch.library**：`mlp_kernel::swiglu` schema/meta/autograd/opcheck/gradcheck/compile 全通过（8 tests）
+- **多机代码**：`tools/preflight.py`（Ampere/Blackwell lane）+ `docs/compatibility-matrix.md` + setup build_base 隔离 + `scripts/verify.sh` + **git bundle 离线同步**（绕 GFW）
+- **交付包**：`EVIDENCE.md`（claim→evidence→level + 30s/3min/15min）、`KNOWN-LIMITATIONS.md`、`docs/fp16-delivery-status.md`
+- **测试规模** 136→**211**（174 passed / 0 failed / 37 skipped，含算子矩阵/P1/训练/fp16）
+
 ## 2026-06-04 #1 — Triton matmul 64×64 + cuTile tile (16,16,16),per-op matmul 3-6x 提速
 
 **内容:**
