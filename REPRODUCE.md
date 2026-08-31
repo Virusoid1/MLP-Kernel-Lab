@@ -30,7 +30,7 @@ cd MLP-Kernel-Lab && git checkout v2-transformer-mlp
 export CUDA_HOME=$(ls -d /usr/local/cuda-* | sort -V | tail -1)
 export PATH=$CUDA_HOME/bin:$PATH
 
-# 一条命令：preflight(架构/lane) -> build -> 全量测试(212) -> bench smoke -> manifest 归档
+# 一条命令：preflight(架构/lane) -> build -> 全量测试(213) -> bench smoke -> manifest 归档
 make reproduce PYTHON=/path/to/venv/bin/python
 ```
 
@@ -47,7 +47,7 @@ bash scripts/verify.sh /path/to/venv/bin/python
 ### 单步复现
 
 ```bash
-# 全量测试（212 项）
+# 全量测试（213 项）
 python -m pytest tests/ -q --tb=short
 
 # SwiGLU block 性能（CUDA Event, manifest）
@@ -64,7 +64,7 @@ python tools/preflight.py
 
 | 项 | 预期 |
 |---|---|
-| make reproduce | **212 tests: 175 passed / 0 failed / 37 skipped** |
+| make reproduce | **213 tests: 176 passed / 0 failed / 37 skipped** |
 | fp16 六后端正确性 | norm_l2 2.4e-4 ~ 6e-4（eager/triton/triton_fused/cuda/cutile/compile） |
 | fp16 Triton 加速 | all-suite 266-case best **3.52x** vs eager-fp32（prefill/train M≥512 2.4-3.5x） |
 | 热状态（大负载） | 73°C / 139.8W / util 100% / throttled=true（笔记本节流事实） |

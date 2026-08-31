@@ -13,8 +13,8 @@ import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
-EXPECTED_TESTS = 212
-EXPECTED_PASSED = 175
+EXPECTED_TESTS = 213
+EXPECTED_PASSED = 176
 MIN_PASSED = 170  # 至少 170 passed（允许未来加测试但不应回落过多）
 
 

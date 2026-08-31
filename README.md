@@ -12,7 +12,7 @@
 - **四/五后端对比**：PyTorch (cuBLAS) / torch.compile / Triton / CUDA / cuTile，同一 workload
 - **SwiGLU MLP block 主线**：fp16 Triton 对 eager-FP32 达 **3.52x（all-suite 266-case best）**，roofline 实测 **26.7 TFLOPS = 86% fp16 理论峰值**，轮间可重复 <2%；decode 小 M 证实为权重带宽 bound（带宽利用率仅 23-36%，per-token 大 batch 摊销 ↓80x）
 - **可追溯结果**：`make reproduce` 一键产出 manifest（commit/dirty/GPU/driver/依赖版本）+ correctness.jsonl + benchmark.json
-- **正确性矩阵**：**212 项 pytest**（175 passed / 0 failed，SwiGLU block 多后端 × shape × dtype + 支持矩阵 + P1 opcheck + fp16 训练闭环）；strict FP32 reference 协议
+- **正确性矩阵**：**213 项 pytest**（176 passed / 0 failed，SwiGLU block 多后端 × shape × dtype + 支持矩阵 + P1 opcheck + fp16/bf16 训练闭环）；strict FP32 reference 协议
 - **CUDA kernel**：naive / tiled / fused / WMMA FP16（matmul_half, L2 2e-4）/ LayerNorm 多版本
 - **精度控制**：TF32 / FP32 全局切换 + fp16/bf16 支持矩阵（`tests/test_transformer_mlp.py::DTYPE_SUPPORT`）
 
