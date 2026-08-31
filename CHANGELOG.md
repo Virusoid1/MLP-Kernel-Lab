@@ -21,6 +21,16 @@
 - **交付包**：`EVIDENCE.md`（claim→evidence→level + 30s/3min/15min）、`KNOWN-LIMITATIONS.md`、`docs/fp16-delivery-status.md`
 - **测试规模** 136→**211**（174 passed / 0 failed / 37 skipped，含算子矩阵/P1/训练/fp16）
 
+## 2026-09-01 v2 Phase-2 收尾 — 交付完善（commit 525db06）
+
+**内容（RTX 3070, 2026-09-01）:**
+- **GPU 热稳定协议（v2 3.5）**：`scripts/gpu_telemetry.py`（bench 期间采样温度/时钟/功耗/利用率）实测 73°C/139.8W/100% util/**throttled=true**（笔记本节流事实）；接入 `make telemetry` 与 verify.sh step4
+- **CI（v2 P3）**：`.github/workflows/ci.yml` cpu-static（compileall + pytest collect 212 + YAML sanity，无 GPU 可跑）+ 可选 gpu-full；本地模拟验证通过
+- **多机一键验证**：`make verify`（= scripts/verify.sh：preflight→smoke→tests→bench+热采集→status，端到端验收通过）；git bundle 离线同步（绕 GFW）
+- **交付包补全**：`REPRODUCE.md`（环境→命令一键复现，4 条命令）、README 交叉引用；EVIDENCE/KNOWN-LIMITATIONS/fp16-status 计数与 manifest 全对齐
+- **fp16 SwiGLU-block 端到端训练**（新证据层）：`test_fp16_swiglu_block_training` 用 P1 可微 op（mlp_kernel::swiglu）学完整 block，loss 0.104→0.038（降 63%）
+- **终版档案**：测试规模 **212**（175 passed / 0 failed / 37 skipped）；all-suite fp16 266-case best 3.52x；数据一致性审计完成
+
 ## 2026-06-04 #1 — Triton matmul 64×64 + cuTile tile (16,16,16),per-op matmul 3-6x 提速
 
 **内容:**
