@@ -213,6 +213,9 @@ Makefile 短路:`make profile-tiled` / `make profile-nsys` / `make profile-ops` 
 | `cutile_layernorm` | LayerNorm forward + backward (ct.sum + atomic_add) | 已完成 |
 | `cutile_fused` | 融合 matmul + bias + GELU | 已完成 |
 | `cutile_swiglu` | 融合 SwiGLU | 已完成 |
+| `cutile_fp16_block` | 【v2】SwiGLU block fp16/bf16（dtype 传播修复后，norm_l2 6e-4/4.7e-3） | 已完成 |
+| torch.library op | 【v2】mlp_kernel::swiglu（schema/meta/autograd/opcheck/gradcheck/compile 全通过） | 已完成 |
+| 训练闭环 | 【v2】pytorch/triton/cuda 训练收敛一致（loss 27.6→2.3） | 已完成 |
 
 ## v2 主线实测（RTX 3070 Laptop, 2026-08）
 
@@ -226,6 +229,7 @@ SwiGLU MLP block，CUDA Event 计时（strict FP32 对照固化于 bench/run.py�
 | 2048 × 768 × 3072 | eager 4.223ms | **1.077ms** | **3.92x** |
 | 512 × 4096 × 11008 | eager 16.17ms | **5.097ms** | **3.17x** |
 | 2048 × 4096 × 11008 | eager 57.63ms | **19.23ms** | **3.00x** |
+| 全 sweep best（152-case 归档） | — | — | **4.07x** |
 
 ### decode 摊销（K=4096/F=11008, fp16, per-token）
 

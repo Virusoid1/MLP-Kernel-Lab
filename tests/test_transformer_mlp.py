@@ -118,12 +118,13 @@ def test_swiglu_block_equals_reference(M, K, F, backend):
 #                          （scale=1.0 时 eager fp16 的 hidden@w_down K=3072 累加溢出 inf = fp16 数值边界）。
 #   triton               : tl.dot 要求同 dtype；bf16 输入与 fp32 累加器冲突（需 input_precision=ieee，未实现）
 #   cuda                 : matmul_tiled_auto 仅 FP32（硬检查 "A must be float32"）
-#   cutile               : ct.mma 要求 x/y 同 dtype；当前只验证 FP32
+#   cutile               : ct.mma 要求 x/y 同 dtype，但 cutile_matmul 恒输出 fp32 → 块组合需转回
+#                          输入 dtype（swiglu_block_cutile 已修复：fp16/bf16 block norm_l2 6e-4/4.7e-3）
 DTYPE_SUPPORT = {
     ("eager", torch.float32): True, ("eager", torch.float16): "overflow", ("eager", torch.bfloat16): "unverified",
     ("triton", torch.float32): True, ("triton", torch.float16): True, ("triton", torch.bfloat16): True,
     ("cuda", torch.float32): True, ("cuda", torch.float16): "fp32-only", ("cuda", torch.bfloat16): "fp32-only",
-    ("cutile", torch.float32): True, ("cutile", torch.float16): "mma-mixed", ("cutile", torch.bfloat16): "mma-mixed",
+    ("cutile", torch.float32): True, ("cutile", torch.float16): True, ("cutile", torch.bfloat16): True,
 }
 
 

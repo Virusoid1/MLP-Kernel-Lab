@@ -106,10 +106,12 @@ def swiglu_block_cutile(x: torch.Tensor, w_gate: torch.Tensor, w_up: torch.Tenso
     """
     from cutile_kernels.matmul import cutile_matmul
     from cutile_kernels.swiglu_cutile import swiglu_cutile
-    gate = cutile_matmul(x, w_gate)
-    up = cutile_matmul(x, w_up)
+    in_dtype = x.dtype
+    # cutile_matmul 恒输出 fp32：中间量转回输入 dtype，保证下游 ct.mma 输入同名
+    gate = cutile_matmul(x, w_gate).to(in_dtype)
+    up = cutile_matmul(x, w_up).to(in_dtype)
     hidden = swiglu_cutile(gate) * up
-    return cutile_matmul(hidden, w_down)
+    return cutile_matmul(hidden, w_down).to(in_dtype)
 
 
 def swiglu_block_compile(x: torch.Tensor, w_gate: torch.Tensor, w_up: torch.Tensor,
