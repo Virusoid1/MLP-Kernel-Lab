@@ -18,7 +18,7 @@
 |---|---|---|
 | E4 跨设备复现 | 仅 3070 验证 | 3080 Ti / 3090 Ti（sm86）、5070 Ti（sm120）实机 |
 | Blackwell（sm120）工具链 | preflight/compat 代码就绪未跑 | 5070 Ti + CUDA ≥13 + 匹配 torch |
-| cuTile 在 5070 Ti 的性能 | 3070 慢（16.7ms），Blackwell 才是 cuTile 主战场 | 5070 Ti 实机 |
+| cuTile 在 5070 Ti 的性能 | 3070 慢（11.8ms，tile (32,64,32) 优化后；仍 2-3x 慢于 triton 4.6ms），Blackwell 才是 cuTile 主战场 | 5070 Ti 实机 |
 | ncu/nsys 硬件计数器 | WSL 无 sudo 权限（ERR_NVGPUCTRPERM） | sudo 或非 WSL 环境 |
 | ~~训练闭环在 fp16 全工况~~ | **已消除（2026-09）：新增 tests/test_training_loop.py 的 fp16 用例** —— eager(cuBLAS fp16) 与 Triton 自定义后端 fp16 均收敛（loss rel<0.005），2/2 测试通过 | ✅ 已验证 |
 
