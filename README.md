@@ -257,6 +257,12 @@ SwiGLU MLP block，CUDA Event 计时（strict FP32 对照固化于 bench/run.py�
 > 结论：decode 小 M 是权重带宽 bound（融合 kernel 无效，负结果见报告）；大 decode batch 摊销后 per-token 成本↓80x。
 > 完整分析：[docs/experiments/swiglu-sweep-20260831-3070.md](docs/experiments/swiglu-sweep-20260831-3070.md) · 证据矩阵：[docs/claim-matrix.md](docs/claim-matrix.md)
 
+### 图（由 `tools/plot_perf_figures.py` 从归档数据生成）
+
+| decode 摊销 | fp16 加速（按 shape） | roofline 效率 |
+|---|---|---|
+| ![decode](figures/decode_amortization.png) | ![fp16](figures/fp16_speedup_shapes.png) | ![roofline](figures/roofline_efficiency.png) |
+
 ## 性能参考（legacy）
 
 > 以下为历史 MNIST/5070 Ti 数据，仅作背景，不作为当前性能主张。
