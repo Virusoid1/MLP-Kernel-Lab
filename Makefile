@@ -15,8 +15,12 @@ status:
 bench-swiglu:
 	$(PYTHON) bench/run.py $(ARGS)
 
-# preflight: 环境探测 + 干净构建（等价 make check + make install，产出 manifest 字段供后续实验引用）
+# preflight: 多机 lane 检测（Ampere 8.6 / Blackwell 12.0）+ 工具链一致性 + 构建建议
 preflight:
+	$(PYTHON) tools/preflight.py
+
+# 旧版: 环境探测 + 干净构建（等价 make check + make install）
+preflight-legacy:
 	$(MAKE) check
 	$(PYTHON) -c "import mlp_cuda; print('mlp_cuda import OK')" || $(PYTHON) setup.py build_ext --inplace
 
