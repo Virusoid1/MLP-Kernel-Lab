@@ -67,6 +67,20 @@ Start-Process "C:\Program Files\NVIDIA Corporation\Nsight Compute 2025.2.1\host-
 
 也可以直接在 Windows 资源管理器地址栏输入 `\\wsl$\Ubuntu\home\virusoid\projects\MLP-Kernel-Lab\profiling\reports\`，双击 `.nsys-rep` 或 `.ncu-rep` 文件。
 
+## profiling 目录工具索引
+
+| 脚本 | 用途 | 示例 |
+|---|---|---|
+| profile_workflow.sh | nsys/ncu 完整工作流（step1-5） | `./profile_workflow.sh all` |
+| profile_pytorch.py | PyTorch/Triton 的 nsys/ncu 输出 | `python profile_pytorch.py --nsys` |
+| profile_compare.py | before/after 对比 | `python profile_compare.py --before ... --after ...` |
+| profile_ops.py | 算子级 profile 定位 | `python profile_ops.py` |
+| bench_cutile.py | cuTile 算子 + MLP 端到端基准 | `python bench_cutile.py` |
+| bench_cutile.py --tile-sweep | **cuTile matmul tile 单变量搜索（E4/Blackwell 选最优 tile）** | `python bench_cutile.py --tile-sweep --M 512 --K 4096 --N 11008` |
+
+> 无 ncu/nsys 权限（WSL 无 sudo，ERR_NVGPUCTRPERM）时：用软件计时（CUDA Event）
+> 代替硬件计数器——见 bench/run.py 的 protocol；热状态用 scripts/gpu_telemetry.py。
+
 ## 工作流详解
 
 ```
