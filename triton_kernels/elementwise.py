@@ -124,7 +124,10 @@ def silu_kernel(
     mask = offsets < n_elements
 
     x = tl.load(input_ptr + offsets, mask=mask, other=0.0)
-    tl.store(output_ptr + offsets, x * tl.sigmoid(x), mask=mask)
+    # Triton tl.sigmoid 只支持 fp32/fp64：低精度输入升 fp32 计算再回落（与 swiglu 同法）
+    x_f32 = x.to(tl.float32)
+    out = x_f32 * tl.sigmoid(x_f32)
+    tl.store(output_ptr + offsets, out.to(x.dtype), mask=mask)
 
 
 def silu(x: torch.Tensor) -> torch.Tensor:
