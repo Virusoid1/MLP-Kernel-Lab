@@ -229,7 +229,7 @@ SwiGLU MLP block，CUDA Event 计时（strict FP32 对照固化于 bench/run.py�
 | 2048 × 768 × 3072 | eager 4.223ms | **1.077ms** | **3.92x** |
 | 512 × 4096 × 11008 | eager 16.17ms | **5.097ms** | **3.17x** |
 | 2048 × 4096 × 11008 | eager 57.63ms | **19.23ms** | **3.00x** |
-| 全 sweep best（152-case 归档） | — | — | **4.07x** |
+| 全 sweep best（266-case all-suite 归档） | — | — | **3.52x**（decode+prefill+train 全部计入）|
 
 ### fp16 六后端对照（正确性全绿 + 性能地图，42-case sweep corr 100% 归档）
 
@@ -242,7 +242,7 @@ SwiGLU MLP block，CUDA Event 计时（strict FP32 对照固化于 bench/run.py�
 | cutile | 11.8ms（tile 优化后）| 5.7e-4 |
 | cuda（matmul_half WMMA） | 29-118ms | 4.8e-4 |
 
-> **结论**：fp16 正确性六后端全闭环（norm_l2 2.4e-4~6e-4）；性能上 triton 是 3070 主路径（vs eager-fp32 达 4.07x），
+> **结论**：fp16 正确性六后端全闭环（norm_l2 2.4e-4~6e-4）；性能上 triton 是 3070 主路径（vs eager-fp32 达 3.52x，all-suite），
 > cuda/cutile 慢（wmma32/ct.mma tile 不敌 cuBLAS，诚实记录为后续优化）。完整数据在
 > `artifacts/swiglu_20260901-010220-prefill-*`（42-case sweep，新 cutile tile 归档）。
 

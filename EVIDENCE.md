@@ -20,7 +20,7 @@
 
 | Claim | Evidence Path | Status | Level |
 |---|---|---|---|
-| fp16 Triton 加速 | `bench/run.py` sweep → `artifacts/swiglu_20260831-222803-*/swiglu_bench.json` | **全 sweep best 4.07x vs eager-fp32**（prefill/train, M≥128）；典型 512×4096×11008 = 4.60ms vs eager 5.01ms | E3 |
+| fp16 Triton 加速 | `bench/run.py` all-suite sweep → `artifacts/swiglu_20260901-013853-all-*/swiglu_bench.json` | **266-case all-suite best 3.52x vs eager-fp32**（decode+prefill+train 全含, corr 100%）；典型 prefill/train M≥512 达 2.4-3.5x，512×4096×11008 = 4.60ms | E3 |
 | fp16 六后端性能地图 | `artifacts/swiglu_20260901-010220-prefill-*/swiglu_bench.json`（新 cutile tile） | triton 4.60 < compile 6.42 < triton_fused 7.02 < cutile 16.7 < cuda 29-118 ms（如实记录） | E3 |
 | decode 摊销 | 实验报告更新 4 + README | per-token ↓80x（M=1→128）| E3 |
 | cutile tile 优化 | `gpu_utils.py` + tile sweep | cutile matmul 1.5-1.6x（32,64,32 默认）| E3(部分) |
