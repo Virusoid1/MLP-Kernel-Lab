@@ -30,6 +30,10 @@ export PATH=$CUDA_HOME/bin:$PATH
 
 ## 2. 到机快速验证（< 5 分钟）
 
+> ✅ 已验证（2026-09-01, 3070 上完整演练 simulate offline onboarding）：
+> bundle clone → checkout → preflight(lane=ampere,exit 0) → import smoke → doc-ref guard ALL OK。
+> 真机唯一差异是 GPU 型号（preflight 会自动识别）。
+
 ```bash
 # 架构 lane 检测 + 工具链一致性（应输出 lane=ampere 或 blackwell）
 python tools/preflight.py --json
