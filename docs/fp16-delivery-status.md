@@ -3,7 +3,7 @@
 ## 一句话
 
 SwiGLU MLP block 的 fp16 正确性在 **六后端全闭环**（eager/triton/triton_fused/cuda/cutile/compile），
-3070 性能主路径 = **Triton**（vs eager-fp32 至 4.07x）。
+3070 性能主路径 = **Triton**（vs eager-fp32 至 3.52x，all-suite 266-case）。
 
 ## 正确性（块级，norm_l2 2.4e-4~6e-4，42-case sweep corr 100%）
 
