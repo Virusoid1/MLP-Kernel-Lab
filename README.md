@@ -10,11 +10,10 @@
 ## 项目亮点
 
 - **四/五后端对比**：PyTorch (cuBLAS) / torch.compile / Triton / CUDA / cuTile，同一 workload
-- **SwiGLU MLP block 主线**：fp16 Triton 在 prefill/train (M≥128) 对 eager-FP32 达 **3.0–3.9x 加速**
-  （K=768 系列 M≥512 与 K=4096 系列 M≥128）；decode 小 M 证实为权重带宽 bound（per-token 大 batch 摊销 ↓80x）
+- **SwiGLU MLP block 主线**：fp16 Triton 对 eager-FP32 达 **3.52x（all-suite 266-case best）**，roofline 实测 **26.7 TFLOPS = 86% fp16 理论峰值**，轮间可重复 <2%；decode 小 M 证实为权重带宽 bound（带宽利用率仅 23-36%，per-token 大 batch 摊销 ↓80x）
 - **可追溯结果**：`make reproduce` 一键产出 manifest（commit/dirty/GPU/driver/依赖版本）+ correctness.jsonl + benchmark.json
-- **正确性矩阵**：55→136 项 pytest（SwiGLU block 多后端 × shape × dtype + 支持矩阵）；strict FP32 reference 协议
-- **CUDA kernel**：naive / tiled / fused / WMMA FP16 / LayerNorm 多版本（WMMA 精度取舍见 claim-matrix）
+- **正确性矩阵**：**212 项 pytest**（175 passed / 0 failed，SwiGLU block 多后端 × shape × dtype + 支持矩阵 + P1 opcheck + fp16 训练闭环）；strict FP32 reference 协议
+- **CUDA kernel**：naive / tiled / fused / WMMA FP16（matmul_half, L2 2e-4）/ LayerNorm 多版本
 - **精度控制**：TF32 / FP32 全局切换 + fp16/bf16 支持矩阵（`tests/test_transformer_mlp.py::DTYPE_SUPPORT`）
 
 > ⚠️ 性能数字均有 GPU / dtype / shape / 协议标注，完整原始数据在 `artifacts/`；旧 MNIST 数字见"性能参考(legacy)"。
@@ -24,12 +23,12 @@
 ```
 MLP-Kernel-Lab/
 ├── kernels/                    # CUDA kernel 实现
-│   ├── vector_add.cu           #   CUDA 基础 & 计时
-│   ├── matmul_naive.cu         #   朴素矩阵乘法 (CMake standalone)
-│   ├── matmul_tiled.cu         #   shared memory 分块矩阵乘法 (CMake standalone)
-│   ├── activation.cu           #   GELU / SiLU device 函数 (CMake standalone)
-│   ├── mlp_fused_first_layer.cu#   融合 matmul+bias+GELU (CMake standalone)
-│   ├── swiglu_fused.cu         #   融合 SwiGLU (CMake standalone)
+│   ├── vector_add.cu           #   ~~LEGACY 练习模板~~（未被 setup.py 引用）
+│   ├── matmul_naive.cu         #   ~~LEGACY 练习模板~~（同上）
+│   ├── matmul_tiled.cu         #   ~~LEGACY 练习模板~~（同上）
+│   ├── activation.cu           #   ~~LEGACY 练习模板~~（同上）
+│   ├── mlp_fused_first_layer.cu#   ~~LEGACY 练习模板~~（同上）
+│   ├── swiglu_fused.cu         #   ~~LEGACY 练习模板~~（同上）
 │   ├── binding.cpp             #   PyTorch C++ extension 绑定
 │   └── mlp/                    # PyTorch extension kernel (按算子族拆分)
 │       ├── device_utils.cuh    #   公共 device 函数 (gelu/silu/warp_reduce)
