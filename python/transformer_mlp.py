@@ -74,6 +74,19 @@ def swiglu_block_triton(x: torch.Tensor, w_gate: torch.Tensor, w_up: torch.Tenso
     return tiled_matmul(hidden, w_down)
 
 
+def swiglu_block_triton_fused(x: torch.Tensor, w_gate: torch.Tensor, w_up: torch.Tensor,
+                                 w_down: torch.Tensor) -> torch.Tensor:
+    """Triton 融合 gate+up：单 launch 完成 gate/up GEMM + SiLU×up epilogue，down 另用 matmul。
+
+    decode 小 M 时 3 个 kernel launch 是主要开销；融合后 1 次 launch 出 hidden。
+    """
+    from triton_kernels.fused_swiglu_gateup import fused_gateup_swiglu
+    from triton_kernels.matmul import tiled_matmul
+    w_gate_up = torch.cat([w_gate, w_up], dim=-1)
+    hidden = fused_gateup_swiglu(x, w_gate_up)
+    return tiled_matmul(hidden, w_down)
+
+
 def swiglu_block_cuda(x: torch.Tensor, w_gate: torch.Tensor, w_up: torch.Tensor,
                       w_down: torch.Tensor) -> torch.Tensor:
     """CUDA：matmul_tiled_auto -> swiglu_fused -> matmul_tiled_auto。"""
@@ -110,6 +123,7 @@ BACKENDS = {
     "concat": swiglu_block_concat,
     "compile": swiglu_block_compile,
     "triton": swiglu_block_triton,
+    "triton_fused": swiglu_block_triton_fused,
     "cuda": swiglu_block_cuda,
     "cutile": swiglu_block_cutile,
 }
@@ -122,6 +136,8 @@ def available_backends() -> list[str]:
         from triton_kernels.matmul import tiled_matmul  # noqa: F401
         from triton_kernels.swiglu_triton import swiglu_triton  # noqa: F401
         out.append("triton")
+        from triton_kernels.fused_swiglu_gateup import fused_gateup_swiglu  # noqa: F401
+        out.append("triton_fused")
     except Exception:
         pass
     try:
