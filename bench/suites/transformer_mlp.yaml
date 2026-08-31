@@ -1,0 +1,38 @@
+# Transformer MLP (SwiGLU) 主 workload 配置（v2 主线）
+# 语义: gate = X@W_gate, up = X@W_up, hidden = SiLU(gate)*up, Y = hidden@W_down
+# 单位: M=token/batch rows, K=hidden, F=FFN
+
+decode:            # 逐 token 推理 (小 M)
+  - {M: 1,    K: 768,  F: 3072}
+  - {M: 4,    K: 768,  F: 3072}
+  - {M: 16,   K: 768,  F: 3072}
+  - {M: 32,   K: 768,  F: 3072}
+  - {M: 1,    K: 4096, F: 11008}
+  - {M: 4,    K: 4096, F: 11008}
+  - {M: 16,   K: 4096, F: 11008}
+  - {M: 32,   K: 4096, F: 11008}
+
+prefill:           # 批量推理 (中 M)
+  - {M: 128,  K: 768,  F: 3072}
+  - {M: 512,  K: 768,  F: 3072}
+  - {M: 2048, K: 768,  F: 3072}
+  - {M: 128,  K: 4096, F: 11008}
+  - {M: 512,  K: 4096, F: 11008}
+  - {M: 2048, K: 4096, F: 11008}
+
+train:             # 训练形状 (大 M)
+  - {M: 256,  K: 768,  F: 3072}
+  - {M: 1024, K: 768,  F: 3072}
+  - {M: 4096, K: 768,  F: 3072}
+  - {M: 256,  K: 4096, F: 11008}
+  - {M: 1024, K: 4096, F: 11008}
+
+dtypes: [fp32, fp16, bf16]
+# backends 顺序即报告顺序；compile 通常最慢首次编译，放最后
+backends: [eager, concat, triton, cuda, cutile, compile]
+# 计时协议
+benchmark:
+  warmup: 20
+  iterations: 100
+  replicates: 2          # 进程级复测（多用 run_bench 脚本的 --reps）
+  correctness_before_bench: true   # 正确性不通过则不进性能汇总
