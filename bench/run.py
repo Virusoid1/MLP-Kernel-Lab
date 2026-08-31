@@ -141,6 +141,10 @@ def run_case(spec, dtype_name: str, backend: str, warmup: int, iters: int) -> di
     except Exception as e:
         return {"error": f"{type(e).__name__}: {str(e)[:140]}", "op": "swiglu_block", "shape": f"{M},{K},{F}", "dtype": dtype_name, "backend": backend}
 
+    # correctness 阈值按 dtype：fp32 严格，fp16/bf16 按位宽放宽
+    corr_tol = {"fp32": 1e-4, "fp16": 2e-2, "bf16": 3e-2}.get(dtype_name, 1e-2)
+    passed = err < corr_tol and finite
+
     n_repeat = min(64, max(1, 64 // M))  # decode 小 M 多拍平均
     torch.cuda.reset_peak_memory_stats()
     samples = measure(lambda a, b, c, d: fn(a, b, c, d), (x, wg, wu, wd), warmup, iters, n_repeat)
@@ -155,7 +159,7 @@ def run_case(spec, dtype_name: str, backend: str, warmup: int, iters: int) -> di
         "M": M, "K": K, "F": F,
         "flops": flops, "flops_formula": "6*M*K*F (gate+up+down)",
         "correctness_norm_l2": round(err, 6),
-        "correctness_passed": err < 1e-4 and finite,
+        "correctness_passed": passed,
         "n_repeat": n_repeat,
         **st,
     }
@@ -239,23 +243,31 @@ def main() -> int:
         if args.max_cases and tested >= args.max_cases:
             break
 
-    # speedup vs eager（同 shape+同 dtype）
+    # speedup: vs 同 dtype eager + vs fp32 eager（fp32 eager 是跨 dtype 性能故事基线）
     eager_lookup = {}
+    fp32_eager_lookup = {}
     for r in rows:
         if r.get("backend") == "eager" and r.get("median_ms") is not None:
             eager_lookup[(r["shape"], r["dtype"])] = r["median_ms"]
+            if r["dtype"] == "fp32":
+                fp32_eager_lookup[r["shape"]] = r["median_ms"]
     for r in rows:
         key = (r.get("shape"), r.get("dtype"))
         base = eager_lookup.get(key)
         if base and r.get("median_ms"):
             r["speedup_vs_eager"] = round(base / r["median_ms"], 3)
+        base32 = fp32_eager_lookup.get(r.get("shape"))
+        if base32 and r.get("median_ms"):
+            r["speedup_vs_fp32_eager"] = round(base32 / r["median_ms"], 3)
 
     payload = {"metadata": md, "suite": args.suite, "rows": rows}
     payload["summary"] = {
         "cases_total": len(rows),
         "cases_with_error": sum(1 for r in rows if r.get("error")),
         "correctness_failed": sum(1 for r in rows if r.get("correctness_passed") is False),
+        "correctness_pass_rate": round(sum(1 for r in rows if r.get("correctness_passed")) / max(1, len(rows)), 3),
         "best_speedup": max([r["speedup_vs_eager"] for r in rows if r.get("speedup_vs_eager")], default=None),
+        "best_speedup_vs_fp32_eager": max([r["speedup_vs_fp32_eager"] for r in rows if r.get("speedup_vs_fp32_eager")], default=None),
     }
     (out_dir / "swiglu_bench.json").write_text(json.dumps(payload, indent=2, ensure_ascii=False), encoding="utf-8")
     print("")
