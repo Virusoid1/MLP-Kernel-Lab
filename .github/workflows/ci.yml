@@ -29,6 +29,9 @@ jobs:
       - name: Dataset/shape config sanity
         run: |
           python -c "import yaml; cfg=yaml.safe_load(open('bench/suites/transformer_mlp.yaml')); print('suite shapes:', sum(len(v) if isinstance(v,list) else 0 for v in cfg.values() if isinstance(v,list)))"
+      - name: Evidence doc-reference guard (--doc-only, no GPU needed)
+        run: |
+          python tools/check_evidence.py --doc-only || exit 1
   # ---------- 可选 GPU runner（手动触发或 GPU-tagged runner） ----------
   gpu-full:
     runs-on: [self-hosted, linux, gpu]  # 需要 GPU-tagged runner；无则跳过

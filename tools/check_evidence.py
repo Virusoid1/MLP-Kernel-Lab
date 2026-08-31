@@ -75,6 +75,7 @@ def check_doc_refs() -> list[str]:
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--fix-json", action="store_true", help="print latest manifest key fields as JSON")
+    ap.add_argument("--doc-only", action="store_true", help="check doc references only (no manifest needed; CI cpu-static)")
     args = ap.parse_args()
     if args.fix_json:
         d = latest_manifest_dir()
@@ -87,7 +88,11 @@ def main() -> int:
         return 0
     print("== evidence consistency check ==")
     errs = []
-    errs += check_manifest()
+    if not args.doc_only:
+        errs += check_manifest()
+        print("  doc references: checking")
+    else:
+        print("  --doc-only: manifest check skipped (CI), doc refs only")
     errs += check_doc_refs()
     print("  doc references: OK" if not any("path missing" in e for e in errs) else "  doc references: see errors")
     if errs:
