@@ -74,9 +74,56 @@ def env_manifest(args) -> dict:
     return md
 
 
-def step_build() -> dict:
-    """构建 CUDA extension（inplace）。"""
-    r = run([sys.executable, "setup.py", "build_ext", "--inplace"])
+def _cuda_toolchain_env() -> dict:
+    """探测并返回能匹配 torch 的 CUDA 工具链环境（PATH/CUDA_HOME）。
+
+    若环境中 nvcc 的主版本与 torch.version.cuda 不一致（例如 apt 装了 12.0、
+    torch 要 13.0），则优先 /usr/local/cuda*/bin 里的新版 nvcc。
+    找不到就原样返回（让 setup.py 报错并给出明确信息）。
+    """
+    base = dict(os.environ)
+    try:
+        import torch
+    except Exception:
+        return base
+    want = (getattr(torch.version, "cuda", None) or "").split(".")[0]
+    if not want:
+        return base
+    # 当前 nvcc 主版本
+    cur = None
+    try:
+        r = subprocess.run(["nvcc", "--version"], capture_output=True, text=True, timeout=10)
+        m = re.search(r"release\s+(\d+)\.", r.stdout)
+        if m:
+            cur = m.group(1)
+    except Exception:
+        pass
+    if cur == want:
+        return base
+    # 在 /usr/local/cuda* 里找匹配的
+    import glob as _glob
+    for d in sorted(_glob.glob("/usr/local/cuda*"), reverse=True):
+        nvcc = os.path.join(d, "bin", "nvcc")
+        if not os.path.exists(nvcc):
+            continue
+        try:
+            r = subprocess.run([nvcc, "--version"], capture_output=True, text=True, timeout=10)
+            m = re.search(r"release\s+(\d+)\.", r.stdout)
+            if m and m.group(1) == want:
+                base["PATH"] = os.path.join(d, "bin") + os.pathsep + base.get("PATH", "")
+                base["CUDA_HOME"] = d
+                base["CUDA_PATH"] = d
+                print(f"[reproduce] selected CUDA {want} toolchain: {d} (was nvcc {cur})")
+                return base
+        except Exception:
+            continue
+    print(f"[reproduce] WARNING: found no CUDA {want} nvcc in /usr/local; using default PATH (may fail)")
+    return base
+
+
+def step_build(env: dict) -> dict:
+    """构建 CUDA extension（inplace），自动匹配 CUDA 工具链版本。"""
+    r = run([sys.executable, "setup.py", "build_ext", "--inplace"], env=env)
     return {"command": "setup.py build_ext --inplace", "ok": r.returncode == 0,
             "stdout_tail": r.stdout[-1200:], "stderr_tail": r.stderr[-1200:]}
 
@@ -205,7 +252,7 @@ def main() -> int:
         steps["build"] = {"ok": True, "skipped": "user-flag"}
     else:
         print("[reproduce] step 1/3: build CUDA extension ...")
-        steps["build"] = step_build()
+        steps["build"] = step_build(_cuda_toolchain_env())
         if not steps["build"]["ok"]:
             print("[reproduce] BUILD FAILED", file=sys.stderr)
             print(steps["build"]["stderr_tail"], file=sys.stderr)
