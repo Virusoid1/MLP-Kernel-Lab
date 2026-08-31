@@ -21,8 +21,8 @@ echo "===== [3/4] tests (quick) ====="
 "$PY" -m pytest tests/test_transformer_mlp.py tests/test_torch_registration.py -q --tb=line || echo "TESTS FAILED"
 
 echo
-echo "===== [4/4] SwiGLU block smoke bench ====="
-"$PY" bench/run.py --suite prefill --dtypes fp16 --backends eager,concat,triton --warmup 5 --iters 20 --max-cases 4 || echo "BENCH FAILED"
+echo "===== [4/4] SwiGLU block smoke bench (with GPU thermal capture) ====="
+"$PY" scripts/gpu_telemetry.py --interval 2 --cmd "$PY bench/run.py --suite prefill --dtypes fp16 --backends eager,concat,triton --warmup 5 --iters 20 --max-cases 4" || echo "BENCH/THERMAL FAILED"
 
 echo
 echo "===== 验证完成 ====="
