@@ -89,8 +89,18 @@ def swiglu_block_triton_fused(x: torch.Tensor, w_gate: torch.Tensor, w_up: torch
 
 def swiglu_block_cuda(x: torch.Tensor, w_gate: torch.Tensor, w_up: torch.Tensor,
                       w_down: torch.Tensor) -> torch.Tensor:
-    """CUDA：matmul_tiled_auto -> swiglu_fused -> matmul_tiled_auto。"""
+    """CUDA：matmul_tiled_auto（fp32）或 matmul_half（fp16 TensorCore）→ swiglu_fused → matmul。
+
+    fp16 输入走 WMMA TensorCore（matmul_half, fp16 in→fp32 acc→fp16 out, L2 2e-4）；
+    fp32 输入走 strict FP32 tiled+Kahan（精度优先，注释见 matmul.cu）。
+    """
     import mlp_cuda
+    if x.dtype == torch.float16:
+        mm = mlp_cuda.matmul_half
+        gate = mm(x, w_gate)
+        up = mm(x, w_up)
+        hidden = torch.nn.functional.silu(gate) * up  # F.silu 支持 fp16（mlp_cuda.silu 仅 fp32）
+        return mm(hidden, w_down)
     gate = mlp_cuda.matmul_tiled_auto(x, w_gate)
     up = mlp_cuda.matmul_tiled_auto(x, w_up)
     hidden = mlp_cuda.swiglu_fused(gate, up)

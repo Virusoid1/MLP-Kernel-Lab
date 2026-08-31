@@ -123,7 +123,7 @@ def test_swiglu_block_equals_reference(M, K, F, backend):
 DTYPE_SUPPORT = {
     ("eager", torch.float32): True, ("eager", torch.float16): "overflow", ("eager", torch.bfloat16): "unverified",
     ("triton", torch.float32): True, ("triton", torch.float16): True, ("triton", torch.bfloat16): True,
-    ("cuda", torch.float32): True, ("cuda", torch.float16): "fp32-only", ("cuda", torch.bfloat16): "fp32-only",
+    ("cuda", torch.float32): True, ("cuda", torch.float16): True, ("cuda", torch.bfloat16): "fp32-only",
     ("cutile", torch.float32): True, ("cutile", torch.float16): True, ("cutile", torch.bfloat16): True,
 }
 
