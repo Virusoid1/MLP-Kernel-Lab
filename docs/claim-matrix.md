@@ -33,6 +33,7 @@
 | cuTile 单 step 微基准 | `profiling/bench_cutile.py`（4 轮取后 3，warmup） | `results/cutile_bench.json`（5070 Ti FP32） | 仅 5070 Ti；3070 未验证 | E3(5070 Ti) |
 | Transformer MLP 推理主线（SwiGLU block 闭环） | 仅有算子：`triton_kernels/swiglu_triton.py`、`cutile_kernels/swiglu_cutile.py`、`kernels/mlp/fused.cu`；**无 `X@W_gate / X@W_up → SiLU(gate)*up → @W_down` 完整 block** | 无 decode/prefill shape sweep；无 eager/compile/自定义后端对比 | **未闭环（v2 主攻方向）** | E1 |
 | PyTorch 自定义算子集成（schema/FakeTensor/opcheck/gradcheck/compile） | 现有 autograd 层（`triton_layers.py` 等）为 `torch.autograd.Function`；**无 torch.library schema/FakeTensor/opcheck 证据** | 未做 | **未实现（v2 计划 P1）** | E0 |
+| SwiGLU MLP block（主线）统一执行层 | `python/transformer_mlp.py`（eager/concat/compile/triton/cuda/cutile 6 后端）+ `tests/test_transformer_mlp.py` + `bench/suites/transformer_mlp.yaml` | **strict FP32 下 triton/cuda/cutile norm_l2 = 1e-6~1e-7 正确**（RTX 3070 实测）；TF32 模式归一化 L2 边界待跑；decode/prefill shape sweep 待做 | 正确性骨架已完成；性能/编译协议待测 | E2(部分) |
 | 构建架构可移植（非硬编码 sm_120） | `setup.py` 仍硬编码 `compute_86/sm_86` + `compute_120/sm_120`；`Makefile` test-cuda 硬编码 `sm_86` | 3070 Laptop 构建未验证干净（依赖现存根目录 `.so`） | **hardcode 待改造（v2 G1）** | E1 |
 | 不依赖根目录旧 `.so` | 根目录 `mlp_cuda.cpython-312-...so` 为已构建产物（被 `*.so` 忽略） | 未验证"从干净环境仅通过 make install 生成" | **待验证（v2 G1）** | E1 |
 

@@ -103,9 +103,12 @@ def _triton_version() -> str:
 
 
 def _cutile_version() -> str:
-    """cuda-tile (cuTile) 版本；未安装时返回 not-installed。"""
+    """cuda-tile (cuTile) 版本；未安装时返回 not-installed。
+
+    注意：pip 包名是 cuda-tile，import 名是 cuda.tile（不是 cuda_tile）。
+    """
     try:
-        import cuda_tile  # noqa: F401
+        import cuda.tile  # noqa: F401
         import importlib.metadata as im
         return im.version("cuda-tile")
     except Exception:
