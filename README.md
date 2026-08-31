@@ -239,7 +239,7 @@ SwiGLU MLP block，CUDA Event 计时（strict FP32 对照固化于 bench/run.py�
 | **triton** | **4.60ms** | 4.8e-4 |
 | compile | 6.42ms | 4.9e-4 |
 | triton_fused | 7.02ms | 2.9e-4 |
-| cutile | 16.7ms | 5.7e-4 |
+| cutile | 11.8ms（tile 优化后）| 5.7e-4 |
 | cuda（matmul_half WMMA） | 29-118ms | 4.8e-4 |
 
 > **结论**：fp16 正确性六后端全闭环（norm_l2 2.4e-4~6e-4）；性能上 triton 是 3070 主路径（vs eager-fp32 达 4.07x），

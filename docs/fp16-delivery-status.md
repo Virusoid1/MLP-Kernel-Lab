@@ -18,7 +18,7 @@ SwiGLU MLP block 的 fp16 正确性在 **六后端全闭环**（eager/triton/tri
 
 ## 性能地图（M=512×4096×11008, fp16, median ms）
 
-triton 4.60 < compile 6.42 < triton_fused 7.02 < cutile 16.7 < cuda 29-118
+triton 4.60 < compile 6.42 < triton_fused 7.02 < cutile 11.8（tile 优化后）< cuda 29-118
 
 （cuda/cutile 慢于 eager16 5-7x —— wmma32/ct.mma tile 不敌 cuBLAS，诚实记录）
 
