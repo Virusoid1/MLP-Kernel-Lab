@@ -201,3 +201,49 @@ def test_fp16_swiglu_block_training(scale):
     assert grads_finite, "fp16 SwiGLU-block: non-finite grads"
     assert losses[-1] < 0.5 * losses[0], (
         f"fp16 SwiGLU-block: not learning ({losses[0]:.4f} -> {losses[-1]:.4f})")
+
+
+@pytest.mark.parametrize("dtype", [torch.bfloat16])
+def test_bf16_swiglu_block_training(dtype):
+    """bf16 SwiGLU block 端到端训练（AdamW；bf16 小梯度需自适应优化器）。
+
+    实测：SGD 收敛慢（rel 0.78），AdamW 1500 ep → loss 0.1046 → ~0（rel 0.000）。
+    """
+    try:
+        import python.torch_registration  # noqa: F401
+        torch.ops.mlp_kernel.swiglu
+    except Exception:
+        pytest.skip("mlp_kernel::swiglu unavailable")
+    torch.manual_seed(11)
+    N, K, F = 128, 64, 64
+    scale = 0.2
+    X = torch.randn(N, K, device="cuda", dtype=dtype) * scale
+    Wg_star = (torch.randn(K, F, device="cuda") * scale).to(dtype)
+    Wu_star = (torch.randn(K, F, device="cuda") * scale).to(dtype)
+    Wd_star = (torch.randn(F, K, device="cuda") * scale).to(dtype)
+    with torch.no_grad():
+        g = X.float() @ Wg_star.float()
+        u = X.float() @ Wu_star.float()
+        h = torch.ops.mlp_kernel.swiglu(g, u)
+        Y = (h @ Wd_star.float()).to(dtype)
+    Wg = (torch.randn(K, F, device="cuda", dtype=dtype) * 0.3 - 0.05).requires_grad_(True)
+    Wu = (torch.randn(K, F, device="cuda", dtype=dtype) * 0.3 - 0.05).requires_grad_(True)
+    Wd = (torch.randn(F, K, device="cuda", dtype=dtype) * 0.3 - 0.05).requires_grad_(True)
+
+    import torch.nn.functional as ffn  # 避免模块级 F 被 shadow
+
+    def fwd():
+        return torch.ops.mlp_kernel.swiglu(X @ Wg, X @ Wu) @ Wd
+
+    opt = torch.optim.AdamW([Wg, Wu, Wd], lr=0.2, weight_decay=0)
+    losses = []
+    for ep in range(1500):
+        opt.zero_grad()
+        loss = ffn.mse_loss(fwd().float(), Y.float())
+        loss.backward()
+        opt.step()
+        losses.append(loss.item())
+    grads_finite = all(torch.isfinite(p.grad).all() for p in (Wg, Wu, Wd))
+    assert grads_finite, f"{dtype} SwiGLU-block: non-finite grads"
+    assert losses[-1] < 0.5 * losses[0], (
+        f"{dtype} SwiGLU-block AdamW: not learning ({losses[0]:.4f} -> {losses[-1]:.4f})")
