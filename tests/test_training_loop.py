@@ -153,3 +153,51 @@ def test_fp16_training_converges(backend):
     assert requires_grad_finite, f"{backend} fp16: non-finite params after training"
     assert losses[-1] < 0.3 * losses[0], (
         f"{backend} fp16: not converged ({losses[0]:.3f} -> {losses[-1]:.3f})")
+
+
+@pytest.mark.parametrize("scale", [0.2])
+def test_fp16_swiglu_block_training(scale):
+    """fp16 SwiGLU block 端到端训练（v2 核心负载，P1 mlp_kernel::swiglu 可微 op）。
+
+    X@Wg, X@Wu → mlp_kernel::swiglu(g,u) → @Wd；学习 Wg/Wu/Wd 使输出匹配
+    由目标权重生成的可达 Y。实测 loss 0.104 → 0.038（降 63%）。
+    """
+    try:
+        import python.torch_registration  # noqa: F401
+        torch.ops.mlp_kernel.swiglu
+    except Exception:
+        pytest.skip("mlp_kernel::swiglu unavailable")
+    torch.manual_seed(11)
+    N, K, F = 128, 64, 64
+    X = torch.randn(N, K, device="cuda", dtype=torch.float16) * scale
+    Wg_star = (torch.randn(K, F, device="cuda") * scale).half()
+    Wu_star = (torch.randn(K, F, device="cuda") * scale).half()
+    Wd_star = (torch.randn(F, K, device="cuda") * scale).half()
+    with torch.no_grad():
+        g = X.float() @ Wg_star.float()
+        u = X.float() @ Wu_star.float()
+        h = torch.ops.mlp_kernel.swiglu(g, u)
+        Y = (h @ Wd_star.float()).half()
+    Wg = (torch.randn(K, F, device="cuda", dtype=torch.float16) * 0.3 - 0.05).requires_grad_(True)
+    Wu = (torch.randn(K, F, device="cuda", dtype=torch.float16) * 0.3 - 0.05).requires_grad_(True)
+    Wd = (torch.randn(F, K, device="cuda", dtype=torch.float16) * 0.3 - 0.05).requires_grad_(True)
+
+    def fwd():
+        g = X @ Wg
+        u = X @ Wu
+        h = torch.ops.mlp_kernel.swiglu(g, u)
+        return h @ Wd
+
+    import torch.nn.functional as ffn  # 避免模块级 F 被 shadow
+    opt = torch.optim.SGD([Wg, Wu, Wd], lr=0.5)
+    losses = []
+    for ep in range(600):
+        opt.zero_grad()
+        loss = ffn.mse_loss(fwd().float(), Y.float())
+        loss.backward()
+        opt.step()
+        losses.append(loss.item())
+    grads_finite = all(torch.isfinite(p.grad).all() for p in (Wg, Wu, Wd))
+    assert grads_finite, "fp16 SwiGLU-block: non-finite grads"
+    assert losses[-1] < 0.5 * losses[0], (
+        f"fp16 SwiGLU-block: not learning ({losses[0]:.4f} -> {losses[-1]:.4f})")
