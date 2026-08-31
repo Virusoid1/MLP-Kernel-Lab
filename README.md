@@ -5,7 +5,7 @@
 
 > 📌 **当前主线实验（v2）**：SwiGLU MLP block（`hidden = SiLU(X@W_gate) * (X@W_up)`，再 @W_down），
 > decode / prefill / train 三档 shape sweep。[实验报告](docs/experiments/swiglu-sweep-20260831-3070.md) ·
-> [证据矩阵](docs/claim-matrix.md) · 复现: `make reproduce`（构建→测试→bench→manifest 归档）
+> [证据矩阵](docs/claim-matrix.md) · [复现文档](REPRODUCE.md) · [EVIDENCE](EVIDENCE.md) · [已知限制](KNOWN-LIMITATIONS.md) · 一键复现: `make reproduce`
 
 ## 项目亮点
 

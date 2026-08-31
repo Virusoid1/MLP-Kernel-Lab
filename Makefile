@@ -1,4 +1,4 @@
-.PHONY: install test bench profile clean plots test-cuda test-python profile-nsys profile-ops bench-op bench-cu analyze gate preflight reproduce status bench-swiglu telemetry
+.PHONY: install test bench profile clean plots test-cuda test-python profile-nsys profile-ops bench-op bench-cu analyze gate preflight reproduce status bench-swiglu telemetry verify
 
 # Python 解释器（可覆盖：make test PYTHON=/path/to/venv/bin/python）
 PYTHON ?= python3
@@ -18,6 +18,11 @@ bench-swiglu:
 # GPU 热稳定/节流采集（v2 3.5）：包裹任意命令采样温度/时钟/功耗
 telemetry:
 	$(PYTHON) scripts/gpu_telemetry.py $(ARGS)
+
+# 其它机器快速验证（= scripts/verify.sh）：preflight->smoke->tests->bench(热采集)->status
+verify:
+	bash scripts/verify.sh $(PYTHON)
+	$(PYTHON) tools/status.py
 
 # preflight: 多机 lane 检测（Ampere 8.6 / Blackwell 12.0）+ 工具链一致性 + 构建建议
 preflight:
