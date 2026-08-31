@@ -17,7 +17,12 @@ from pathlib import Path
 def render_md(payload: dict) -> str:
     md = payload["metadata"]
     out = [f"# SwiGLU MLP Block Benchmark — {payload.get('suite', '?')}", ""]
-    out.append(f"- git: {md.get('git', {}).get('short_commit')} ({md.get('git', {}).get('branch')}, dirty={md.get('git', {}).get('dirty')})")
+    # git 信息可能来自 metadata.git（reproduce 添加）或无（bench/run.py 单跑）；fallback 到 metadata.git_sha
+    git = md.get("git") or {}
+    git_sha = git.get("short_commit") or md.get("git_sha", "?")
+    git_branch = git.get("branch", "?")
+    git_dirty = git.get("dirty", md.get("git_dirty", "?"))
+    out.append(f"- git: {git_sha} ({git_branch}, dirty={git_dirty})")
     out.append(f"- gpu: {md.get('gpu', {}).get('name')} (cc {md.get('gpu', {}).get('cc')})")
     out.append(f"- driver: {md.get('driver')} | cuda: {md.get('cuda')} | torch {md.get('torch')} / triton {md.get('triton')}")
     out.append(f"- protocol: warmup={md.get('benchmark_protocol', {}).get('warmup')} iters={md.get('benchmark_protocol', {}).get('iters')}")

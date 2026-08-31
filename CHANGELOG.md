@@ -1,5 +1,14 @@
 # CHANGELOG
 
+## 2026-08-31 v2 — SwiGLU MLP block 主线 + fp16 TensorCore 胜势 + 可追溯复现
+
+**里程碑（v2 阶段）：**
+- **SwiGLU block 主线**：`python/transformer_mlp.py`（eager/concat/compile/triton/cuda/cutile/triton_fused 7 后端）+ bench/suites YAML + 正确性测试（shape×dtype 支持矩阵）
+- **fp16 TensorCore**：`triton_kernels/matmul.py` 支持 fp16/bf16（input_precision + fp32 累加）；`swiglu_triton.py` sigmoid 升 fp32。**实测 prefill/train 3.0–3.9x vs eager-FP32**（M≥128）
+- **make reproduce**：`tools/reproduce.py` 一键 build→test→bench→manifest（自动选 CUDA 工具链版本）
+- **E3 基线归档**：228/152-case sweep 带 manifest；first decode 融合 kernel 负结果（带宽 bound）+ cuda WMMA 精度取舍根因
+- 测试规模 55→136（SwiGLU 用例加入）
+
 ## 2026-06-04 #1 — Triton matmul 64×64 + cuTile tile (16,16,16),per-op matmul 3-6x 提速
 
 **内容:**

@@ -1,11 +1,19 @@
-.PHONY: install test bench profile clean plots test-cuda test-python profile-nsys profile-ops bench-op bench-cu analyze gate preflight reproduce
+.PHONY: install test bench profile clean plots test-cuda test-python profile-nsys profile-ops bench-op bench-cu analyze gate preflight reproduce status bench-swiglu
 
 # Python 解释器（可覆盖：make test PYTHON=/path/to/venv/bin/python）
 PYTHON ?= python3
 
-# 一键复现：preflight(构建) -> 55 项测试 -> bench smoke -> manifest 汇总到 artifacts/<run-id>/
+# 一键复现：preflight(构建) -> 全量测试 -> bench smoke -> manifest 汇总到 artifacts/<run-id>/
 reproduce:
 	$(PYTHON) tools/reproduce.py
+
+# v2 项目状态总览（git/测试/manifest/最新 sweep）
+status:
+	$(PYTHON) tools/status.py
+
+# SwiGLU block 基准（v2 主线）；ARGS 透传如 --suite decode --dtypes fp16
+bench-swiglu:
+	$(PYTHON) bench/run.py $(ARGS)
 
 # preflight: 环境探测 + 干净构建（等价 make check + make install，产出 manifest 字段供后续实验引用）
 preflight:

@@ -7,9 +7,10 @@
 > 证据等级（沿用 `resume/interview-prep/.../10-project-experiment-roadmap.md`）：
 > E0 计划 / E1 实现 / E2 正确性（当前环境测试+reference+边界）/ E3 性能（协议+raw data+profiles）/ E4 复现（第二设备/独立脚本）。
 >
-> **当前验证环境（2026-07，RTX 3070 Laptop）**：Python 3.12.3 / torch 2.11.0+cu130 / Triton 3.6.0 /
+> **当前验证环境（2026-08，RTX 3070 Laptop）**：Python 3.12.3 / torch 2.11.0+cu130 / Triton 3.6.0 /
 > pytest 9.0.3 / cuda-tile 1.3.0（= `cuda.tile`）/ driver 610.88 / CUDA 13.2 / venv=~/projects/Salvation-Lies-Within/venv。
-> 四后端全部可 import，55 项 Python 测试实测通过。
+> 四后端全部可 import；**全量 136 项 Python 测试实测通过（124 passed / 12 skipped / 0 failed，
+> 含 SwiGLU block 多后端×shape×dtype 用例，2026-08-31 `make reproduce` 归档）**。
 
 ## 说明（本文件的前提）
 
@@ -21,12 +22,12 @@
 
 | 主张 | 当前源码/证据路径 | 当前运行证据 | 状态 | 级别 |
 |---|---|---|---|---|
-| 三个自定义 GPU 后端（Triton / CUDA / cuTile）可 import | `triton_kernels/`、`kernels/mlp/*.cu` + `setup.py`、`cutile_kernels/` | 未在当前环境复跑（缺 pytest/GPU 复验） | 实现存在，未复核 | E1 |
+| 三个自定义 GPU 后端（Triton / CUDA / cuTile）可 import + 正确性 | `triton_kernels/`、`kernels/mlp/*.cu` + `setup.py`、`cutile_kernels/` | **已在 RTX 3070 复跑：55 项原始算子测试 + SwiGLU block 测试全绿**（136 项中 124 passed / 12 dtype-skip） | 已验证 import + 正确性 | E2 |
 | 四后端 FP32 精度对齐 98.52%–98.71% | CHANGELOG 2026-06-03 #1（wmma64 修复后 15-epoch） | `results/compare_20260602_235625.json`（5070 Ti 实测），README 完整 4-backend 实测小节 | 历史结果（RTX 5070 Ti），当前 GPU 未复跑 | E3(5070 Ti) / 未复现 |
 | 测试通过 | `tests/test_triton_kernels.py` / `test_cuda_kernels.py` / `test_cutile_kernels.py` / `test_kernels.cu` | **55 passed in 19.21s（2026-07 RTX 3070 Laptop, venv=Salvation-Lies-Within, pytest 9.0.3, torch 2.11.0+cu130）**。55 = parametrize 展开后用例数（源码 def 函数为 18+13+15=46，parametrize 展开后 55）。cuTile 15 项全部真通过（cuda.tile 1.3.0 已装） | 已复跑通过；C++ test_kernels 未跑（需 nvcc 手动） | E2 |
 | 精度控制 TF32/FP32 全局切换，多后端公平对比 | `triton_kernels/precision.py`、`run_compare.py --precision`、`benchmark_ops.py --precision/--ref-tf32` | 旧 `results/baseline.json` 为 tf32；`--ref-tf32` 可切 ref | 实现存在 | E1 |
 | 统一算子级 benchmark 入口 | `benchmark_ops.py`（唯一权威入口；`bench/` 已删除） | `make bench` / `make bench-quick` / `make test` → `benchmark_ops.py` | 已统一（比 v2 计划预期的更早完成） | E2 |
-| Manifest 元数据（GPU/driver/torch/git） | `python/mnist/benchmark.py::capture_metadata()` + `benchmark_ops.py::export_json()`（`{metadata, rows}` schema） | `results/baseline.json`（5070 Ti, git_sha=8991e9d） | 部分实现；**缺 triton/cutile/nvcc 版本、git_dirty、raw samples** | E3 雏形 |
+| Manifest 元数据（GPU/driver/cuda/torch/triton/cutile/git_dirty） | `capture_metadata()`（已补 triton/cutile/nvcc/git_dirty 字段）+ `export_json()`；`tools/reproduce.py` 一键归档 | `artifacts/20260831-194320-9a265d4-.../manifest.json`（136 tests, 124 passed） | **Manifest 完整，可追溯** | E3 |
 | 测量-分析-优化闭环 | `Makefile bench-op/analyze/gate`、`tools/analyze_bench.py`、`tools/run_full_eval.sh`、`tools/gpu_warmup.py` | `results/baseline*.json` + CHANGELOG 编号条目 | 已存在 | E2 |
 | Nsight workflow | `profiling/run_ncu.sh`（rewrite, 与已删 `bench/` 解耦）、`profile_nsys.sh`、`profile_ops.py` | `CHANGELOG` 记录 ncu 使用（wmma64 / launch_bounds 定位） | 实现存在 | E2 |
 | CUDA 端到端性能（训练总时长/推理延迟最低） | CHANGELOG 2026-06-03 #1（CUDA 27.0s / 0.298ms / 858K samples/s） | `results/four_backend_fp32_v2.log`, `results/compare_20260602_235625.json` | **仅 5070 Ti**；3070 Laptop 未复跑；机制=WMMA64+launch_bounds 修复 | E3(5070 Ti) |

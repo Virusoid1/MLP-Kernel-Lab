@@ -1,18 +1,23 @@
-# MLP-Kernel-Lab
+# MLP-Kernel-Lab (v2)
 
-面向 Transformer MLP 推理的自定义 CUDA & Triton & cuTile kernel 实验，以性能分析驱动优化，并与 PyTorch 基线进行对比。支持 MNIST MLP 的 PyTorch / Triton / CUDA / cuTile 四后端端到端训练、推理及详细性能对比。
+面向 **Transformer MLP** 的多后端 Kernel 正确性与性能实验系统：PyTorch eager / `torch.compile` / Triton / CUDA C++ / cuTile，
+以 profile 驱动的优化方法论评估"在哪些 M/K/N、dtype、GPU 下自定义实现能超过 cuBLAS 基线"。
+
+> 📌 **当前主线实验（v2）**：SwiGLU MLP block（`hidden = SiLU(X@W_gate) * (X@W_up)`，再 @W_down），
+> decode / prefill / train 三档 shape sweep。[实验报告](docs/experiments/swiglu-sweep-20260831-3070.md) ·
+> [证据矩阵](docs/claim-matrix.md) · 复现: `make reproduce`（构建→测试→bench→manifest 归档）
 
 ## 项目亮点
 
-- **四后端对比**：PyTorch (cuBLAS) / Triton / CUDA / cuTile 端到端训练对比
-- **CUDA kernel**：naive / shared-memory tiled / fused activation / WMMA FP16 / LayerNorm 多版本实现
-- **Triton kernel**：完整 MLP 训练算子（matmul、elementwise、backward、dropout、loss、layernorm、fused SwiGLU）
-- **cuTile kernel**：NVIDIA cuTile Python tile-based GPU 编程（matmul、elementwise、backward、layernorm、fused MLP、SwiGLU）
-- **精度控制**：TF32 / FP32 全局切换，多后端公平对比
-- **LayerNorm**：Triton + CUDA + cuTile 三端实现，forward + backward
-- **autograd 集成**：TritonLinear/CUDALinear/CUTILELinear 等 `torch.autograd.Function` 层，可直接嵌入 PyTorch 训练循环
-- **完整测试**：55 项 Python 测试（parametrize 展开后计数，2026-07 RTX 3070 Laptop 实测 55 passed / 19.2s）+ 6 项 C++ CUDA 测试（见 docs/claim-matrix.md）
-- **Nsight Compute profiling** & Chrome trace 导出
+- **四/五后端对比**：PyTorch (cuBLAS) / torch.compile / Triton / CUDA / cuTile，同一 workload
+- **SwiGLU MLP block 主线**：fp16 Triton 在 prefill/train (M≥128) 对 eager-FP32 达 **3.0–3.9x 加速**
+  （K=768 系列 M≥512 与 K=4096 系列 M≥128）；decode 小 M 证实为权重带宽 bound（per-token 大 batch 摊销 ↓80x）
+- **可追溯结果**：`make reproduce` 一键产出 manifest（commit/dirty/GPU/driver/依赖版本）+ correctness.jsonl + benchmark.json
+- **正确性矩阵**：55→136 项 pytest（SwiGLU block 多后端 × shape × dtype + 支持矩阵）；strict FP32 reference 协议
+- **CUDA kernel**：naive / tiled / fused / WMMA FP16 / LayerNorm 多版本（WMMA 精度取舍见 claim-matrix）
+- **精度控制**：TF32 / FP32 全局切换 + fp16/bf16 支持矩阵（`tests/test_transformer_mlp.py::DTYPE_SUPPORT`）
+
+> ⚠️ 性能数字均有 GPU / dtype / shape / 协议标注，完整原始数据在 `artifacts/`；旧 MNIST 数字见"性能参考(legacy)"。
 
 ## 项目结构
 
@@ -54,29 +59,31 @@ MLP-Kernel-Lab/
 │   ├── layernorm.py            #   LayerNorm forward/backward
 │   ├── mlp_cutile.py           #   融合 matmul+bias+GELU
 │   └── swiglu_cutile.py        #   融合 SwiGLU
-├── python/mnist/               # MNIST 训练子项目
-│   ├── model.py                #   PyTorch MLP 模型
-│   ├── triton_model.py         #   Triton MLP 模型
-│   ├── cuda_model.py           #   CUDA MLP 模型
-│   ├── cutile_model.py         #   cuTile MLP 模型
-│   ├── triton_layers.py        #   TritonLinear/TritonLayerNorm autograd 层
-│   ├── cuda_layers.py          #   CUDALinear/CUDALayerNorm autograd 层
-│   ├── cutile_layers.py        #   CUTILELinear/CUTILELayerNorm autograd 层
-│   ├── trainer.py              #   训练器（AdamW + CosineAnnealing）
-│   ├── benchmark.py            #   CUDA Event 精确基准测试
-│   └── dashboard.py            #   控制台输出 & JSON 导出
-├── tests/                      # 测试
+├── python/
+│   ├── transformer_mlp.py      #   【v2 主线】SwiGLU MLP block 统一执行层（eager/concat/compile/triton/cuda/cutile/fused）
+│   └── mnist/                  #   历史 MNIST 训练子项目（模型/layers/trainer/benchmark/dashboard）
+├── bench/
+│   ├── run.py                  #   【v2 主线】SwiGLU block 性能基准（CUDA Event, manifest）
+│   └── suites/transformer_mlp.yaml  #   decode/prefill/train 三档 shape 配置
+├── tests/
 │   ├── test_triton_kernels.py  #   Triton kernel 正确性测试
 │   ├── test_cuda_kernels.py    #   CUDA kernel 正确性测试
 │   ├── test_cutile_kernels.py  #   cuTile kernel 正确性测试
+│   ├── test_transformer_mlp.py #   【v2 主线】SwiGLU block 正确性 + dtype 支持矩阵
 │   └── test_kernels.cu         #   6 项 C++ CUDA 单元测试
+├── tools/
+│   ├── reproduce.py            #   【v2 主线】make reproduce 驱动（build→test→bench→manifest）
+│   └── render_swiglu.py        #   swiglu_bench.json → Markdown/CSV 渲染
 ├── configs/
 │   └── mnist_mlp.yaml          # MNIST 训练配置
-├── run_compare.py              # 四后端对比训练（PyTorch/Triton/CUDA/cuTile）
-├── benchmark_ops.py            #   算子级横向对比
-├── profiling/                  # Nsight Compute 脚本
-├── setup.py                    # CUDA extension 构建配置
-├── Makefile                    # install / test / bench / profile
+├── docs/
+│   ├── claim-matrix.md         #   【v2 主线】主张→证据→级别 矩阵
+│   └── experiments/            #   实验报告（swiglu-sweep-20260831-3070.md）
+├── run_compare.py              # 历史：四后端对比训练
+├── benchmark_ops.py            # 算子级横向对比（权威基准入口之一）
+├── profiling/                  # Nsight Compute/Systems 脚本（ncu/nsys/profile_ops）
+├── setup.py                    # CUDA extension 构建（动态架构探测）
+├── Makefile                    # install / test / bench / reproduce / preflight
 └── requirements.txt
 ```
 
@@ -133,7 +140,15 @@ python run_compare.py --epochs 5                                     # PyTorch v
 | `--cutile` | 启用 cuTile 后端 | - |
 | `--no-bench` | 跳过基准测试 | - |
 
-### 算子级基准测试
+### 【v2 主线】SwiGLU MLP block 基准
+
+```bash
+python bench/run.py --suite all --dtypes fp32,fp16       # 全 shape sweep（带 manifest）
+python bench/run.py --suite decode --dtypes fp16        # decode 档
+make reproduce                                          # 一键：构建→测试→bench→manifest 归档
+```
+
+### 算子级基准测试（历史）
 
 ```bash
 python benchmark_ops.py --precision fp32 --warmup 20 --iters 100
@@ -142,7 +157,7 @@ python benchmark_ops.py --precision fp32 --warmup 20 --iters 100
 ### 测试
 
 ```bash
-make test-python       # Python 测试（55 项，2026-07 3070 实测通过）
+make test-python       # Python 测试（136 项，含 SwiGLU block；通过数以 pytest 报告为准）
 make test-cuda         # C++ CUDA 测试（6 项）
 ```
 
@@ -178,6 +193,9 @@ Makefile 短路:`make profile-tiled` / `make profile-nsys` / `make profile-ops` 
 
 | 实现 | 说明 | 状态 |
 |------|------|------|
+| `transformer_mlp` | 【v2】SwiGLU block 统一执行层（eager/concat/compile/triton/cuda/cutile/fused） | 已完成 |
+| `triton_fp16` | 【v2】Triton matmul fp16/bf16 TensorCore（input_precision + fp32 累加） | 已完成（norm_l2 2e-4/4e-3） |
+| `fused_gateup` | 【v2】fused gate+up GEMM + SiLU epilogue（decode 实验，负结果保留） | 已完成（正确，性能负结果见报告） |
 | `torch` | `torch.matmul` + `F.gelu` 基线 | 已完成 |
 | `triton_mlp` | TritonLinear + TritonLayerNorm 端到端训练 | 已完成 |
 | `triton_matmul` | `tl.dot` 分块矩阵乘法（L2 缓存优化 + autotune） | 已完成 |
@@ -196,7 +214,31 @@ Makefile 短路:`make profile-tiled` / `make profile-nsys` / `make profile-ops` 
 | `cutile_fused` | 融合 matmul + bias + GELU | 已完成 |
 | `cutile_swiglu` | 融合 SwiGLU | 已完成 |
 
-## 性能参考
+## v2 主线实测（RTX 3070 Laptop, 2026-08）
+
+SwiGLU MLP block，CUDA Event 计时（strict FP32 对照固化于 bench/run.py），完整 228/152-case 数据在 `artifacts/`：
+
+### fp16 Triton vs eager-FP32（加速比；prefill/train 赢区）
+
+| shape | X@W_gate+up+down | triton-fp16 | vs eager-fp32 |
+|---|---|---|---|
+| 512 × 768 × 3072 | eager 0.996ms | **0.342ms** | **2.92x** |
+| 2048 × 768 × 3072 | eager 4.223ms | **1.077ms** | **3.92x** |
+| 512 × 4096 × 11008 | eager 16.17ms | **5.097ms** | **3.17x** |
+| 2048 × 4096 × 11008 | eager 57.63ms | **19.23ms** | **3.00x** |
+
+### decode 摊销（K=4096/F=11008, fp16, per-token）
+
+| batch M | 1 | 8 | 32 | 128 |
+|---|---|---|---|---|
+| per-token ms | 0.75–0.83 | 0.094 | 0.024 | **0.010（↓80x）** |
+
+> 结论：decode 小 M 是权重带宽 bound（融合 kernel 无效，负结果见报告）；大 decode batch 摊销后 per-token 成本↓80x。
+> 完整分析：[docs/experiments/swiglu-sweep-20260831-3070.md](docs/experiments/swiglu-sweep-20260831-3070.md) · 证据矩阵：[docs/claim-matrix.md](docs/claim-matrix.md)
+
+## 性能参考（legacy）
+
+> 以下为历史 MNIST/5070 Ti 数据，仅作背景，不作为当前性能主张。
 
 FP32 模式，模型 `[784,1024,512,256,10]`，ReLU + LayerNorm + Dropout=0.1，15 epochs：
 
