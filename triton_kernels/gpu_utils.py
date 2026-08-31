@@ -83,7 +83,7 @@ def get_arch_params() -> dict:
             "max_block_m": 128, "max_block_n": 128, "max_block_k": 64,
             "max_stages": 4, "max_warps": 8,
             "elementwise_block": 4096,
-            "cutile_matmul_tile": (32, 32, 32),
+            "cutile_matmul_tile": (32, 64, 32),  # 3070 实测 (32,64,32) 比 (32,32,32) 快 1.5-1.6x (tile sweep 2026-09)
             "cutile_elementwise_tile": 512,
             "cutile_layernorm_tile": 256,
         }
