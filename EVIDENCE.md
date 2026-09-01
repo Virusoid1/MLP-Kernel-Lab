@@ -9,10 +9,10 @@
 
 | Claim | Evidence Path | Status | Level |
 |---|---|---|---|
-| 全量测试通过 | `make reproduce`（commit 93050de, 2026-09-02 冻结）→ `artifacts/20260902-031530-93050de-*/manifest.json` | **213 tests: 181 passed / 0 failed / 32 skipped**（含 fp16+bf16 SwiGLU-block 训练；+5 = cuda 算子级 fp16 解锁） | E2 |
+| 全量测试通过 | `make reproduce`（commit 30187f2, 2026-09-02 冻结）→ `artifacts/20260902-032908-30187f2-*/manifest.json` | **213 tests: 186 passed / 0 failed / 27 skipped**（含 fp16+bf16 SwiGLU-block 训练；+10 = cuda 算子级 fp16+bf16 解锁） | E2 |
 | 55 原始算子测试 | `tests/test_{triton,cuda,cutile}_kernels.py` | passed（并入 209 全量） | E2 |
 | SwiGLU block 六后端正确性 | `tests/test_transformer_mlp.py`（DTYPE_SUPPORT 矩阵） | fp16: 六后端闭环（corr 100%）| E2 |
-| 算子级 dtype 矩阵 | `tests/test_dtype_support_matrix.py`（执行式探测） | cuda-fp16 5 行（swiglu/softmax/relu/gelu/silu）从 blocked-skip 转 PASSED（25 passed / 23 skipped，2026-09-02） | E2→E4 |
+| 算子级 dtype 矩阵 | `tests/test_dtype_support_matrix.py`（执行式探测） | cuda-fp16 **+bf16** 各 5 行转 PASSED：**30 passed / 18 skipped**（2026-09-02，3070 + 5070 Ti 双架构） | E2→E4 |
 | ~~CUDA 算子级 fp16 缺口~~ | `kernels/mlp/{activation,fused,softmax}.cu` + `kernels/binding.cpp`（half 变体：fp16 in→fp32 math→fp16 out） | **已封闭（2026-09-02）**：cuda fp16 block 全自定义（matmul_half + swiglu_fused_half），不再回退 F.silu，norm_l2 5e-4 | E4 |
 | 训练语义保持 | `tests/test_training_loop.py` | 4/4：pytorch/triton/cuda 收敛一致（loss 27.6→2.3, rel<0.085）| E2 |
 | P1 torch.library 集成 | `tests/test_torch_registration.py` | 8/8：opcheck/gradcheck/compile/backward 全通过 | E2 |

@@ -41,6 +41,9 @@ void launch_swiglu_fused(
 void launch_swiglu_fused_half(
     const half* gate, const half* up, half* output,
     int total_elements, cudaStream_t stream);
+void launch_swiglu_fused_bf16(
+    const __nv_bfloat16* gate, const __nv_bfloat16* up, __nv_bfloat16* output,
+    int total_elements, cudaStream_t stream);
 
 void launch_gelu(const float* input, float* output, int n, cudaStream_t stream);
 void launch_relu(const float* input, float* output, int n, cudaStream_t stream);
@@ -50,6 +53,11 @@ void launch_silu(const float* input, float* output, int n, cudaStream_t stream);
 void launch_gelu_half(const half* input, half* output, int n, cudaStream_t stream);
 void launch_relu_half(const half* input, half* output, int n, cudaStream_t stream);
 void launch_silu_half(const half* input, half* output, int n, cudaStream_t stream);
+
+// bf16 变体（cuda 算子级 bf16 解锁，v2 4.x）
+void launch_gelu_bf16(const __nv_bfloat16* input, __nv_bfloat16* output, int n, cudaStream_t stream);
+void launch_relu_bf16(const __nv_bfloat16* input, __nv_bfloat16* output, int n, cudaStream_t stream);
+void launch_silu_bf16(const __nv_bfloat16* input, __nv_bfloat16* output, int n, cudaStream_t stream);
 
 void launch_gelu_backward(
     const float* grad_output, const float* input, float* grad_input,
@@ -105,6 +113,9 @@ void launch_softmax(
     int M, int N, cudaStream_t stream);
 void launch_softmax_half(
     const half* input, half* output,
+    int M, int N, cudaStream_t stream);
+void launch_softmax_bf16(
+    const __nv_bfloat16* input, __nv_bfloat16* output,
     int M, int N, cudaStream_t stream);
 
 void launch_maxpool2d(
@@ -249,6 +260,11 @@ torch::Tensor gelu(torch::Tensor x) {
             reinterpret_cast<const half*>(x.data_ptr<at::Half>()),
             reinterpret_cast<half*>(output.data_ptr<at::Half>()),
             x.numel(), _get_cuda_stream(x));
+    } else if (x.scalar_type() == torch::kBFloat16) {
+        launch_gelu_bf16(
+            reinterpret_cast<const __nv_bfloat16*>(x.data_ptr<at::BFloat16>()),
+            reinterpret_cast<__nv_bfloat16*>(output.data_ptr<at::BFloat16>()),
+            x.numel(), _get_cuda_stream(x));
     } else {
         CHECK_FLOAT32(x);
         launch_gelu(x.data_ptr<float>(), output.data_ptr<float>(), x.numel(),
@@ -266,6 +282,11 @@ torch::Tensor relu(torch::Tensor x) {
             reinterpret_cast<const half*>(x.data_ptr<at::Half>()),
             reinterpret_cast<half*>(output.data_ptr<at::Half>()),
             x.numel(), _get_cuda_stream(x));
+    } else if (x.scalar_type() == torch::kBFloat16) {
+        launch_relu_bf16(
+            reinterpret_cast<const __nv_bfloat16*>(x.data_ptr<at::BFloat16>()),
+            reinterpret_cast<__nv_bfloat16*>(output.data_ptr<at::BFloat16>()),
+            x.numel(), _get_cuda_stream(x));
     } else {
         CHECK_FLOAT32(x);
         launch_relu(x.data_ptr<float>(), output.data_ptr<float>(), x.numel(),
@@ -282,6 +303,11 @@ torch::Tensor silu(torch::Tensor x) {
         launch_silu_half(
             reinterpret_cast<const half*>(x.data_ptr<at::Half>()),
             reinterpret_cast<half*>(output.data_ptr<at::Half>()),
+            x.numel(), _get_cuda_stream(x));
+    } else if (x.scalar_type() == torch::kBFloat16) {
+        launch_silu_bf16(
+            reinterpret_cast<const __nv_bfloat16*>(x.data_ptr<at::BFloat16>()),
+            reinterpret_cast<__nv_bfloat16*>(output.data_ptr<at::BFloat16>()),
             x.numel(), _get_cuda_stream(x));
     } else {
         CHECK_FLOAT32(x);
@@ -378,6 +404,12 @@ torch::Tensor swiglu_fused(torch::Tensor gate, torch::Tensor up) {
             reinterpret_cast<const half*>(gate.data_ptr<at::Half>()),
             reinterpret_cast<const half*>(up.data_ptr<at::Half>()),
             reinterpret_cast<half*>(output.data_ptr<at::Half>()),
+            gate.numel(), _get_cuda_stream(gate));
+    } else if (gate.scalar_type() == torch::kBFloat16) {
+        launch_swiglu_fused_bf16(
+            reinterpret_cast<const __nv_bfloat16*>(gate.data_ptr<at::BFloat16>()),
+            reinterpret_cast<const __nv_bfloat16*>(up.data_ptr<at::BFloat16>()),
+            reinterpret_cast<__nv_bfloat16*>(output.data_ptr<at::BFloat16>()),
             gate.numel(), _get_cuda_stream(gate));
     } else {
         CHECK_FLOAT32(gate); CHECK_FLOAT32(up);
@@ -537,6 +569,11 @@ torch::Tensor softmax(torch::Tensor x) {
         launch_softmax_half(
             reinterpret_cast<const half*>(x.data_ptr<at::Half>()),
             reinterpret_cast<half*>(output.data_ptr<at::Half>()),
+            M, N, _get_cuda_stream(x));
+    } else if (x.scalar_type() == torch::kBFloat16) {
+        launch_softmax_bf16(
+            reinterpret_cast<const __nv_bfloat16*>(x.data_ptr<at::BFloat16>()),
+            reinterpret_cast<__nv_bfloat16*>(output.data_ptr<at::BFloat16>()),
             M, N, _get_cuda_stream(x));
     } else {
         CHECK_FLOAT32(x);

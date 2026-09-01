@@ -8,6 +8,7 @@
 
 #include <cuda_runtime.h>
 #include <cuda_fp16.h>
+#include <cuda_bf16.h>
 #include "device_utils.cuh"
 
 // ============================================================
@@ -143,5 +144,33 @@ void launch_swiglu_fused_half(
     int block_size = 256;
     int grid_size = (total_elements + block_size - 1) / block_size;
     swiglu_fused_half_kernel<<<grid_size, block_size, 0, stream>>>(
+        gate, up, output, total_elements);
+}
+
+// ============================================================
+// swiglu_fused (bf16: bf16 in -> fp32 math -> bf16 out)
+// ============================================================
+
+__global__ void swiglu_fused_bf16_kernel(
+    const __nv_bfloat16* __restrict__ gate,
+    const __nv_bfloat16* __restrict__ up,
+    __nv_bfloat16* __restrict__ output,
+    int total_elements)
+{
+    int idx = blockIdx.x * blockDim.x + threadIdx.x;
+    if (idx < total_elements) {
+        float g = __bfloat162float(gate[idx]);
+        float sigmoid_g = 1.0f / (1.0f + expf(-g));
+        output[idx] = __float2bfloat16(g * sigmoid_g * __bfloat162float(up[idx]));
+    }
+}
+
+void launch_swiglu_fused_bf16(
+    const __nv_bfloat16* gate, const __nv_bfloat16* up, __nv_bfloat16* output,
+    int total_elements, cudaStream_t stream)
+{
+    int block_size = 256;
+    int grid_size = (total_elements + block_size - 1) / block_size;
+    swiglu_fused_bf16_kernel<<<grid_size, block_size, 0, stream>>>(
         gate, up, output, total_elements);
 }

@@ -9,6 +9,7 @@
 
 #include <cuda_runtime.h>
 #include <cuda_fp16.h>
+#include <cuda_bf16.h>
 #include "device_utils.cuh"
 
 // ============================================================
@@ -84,6 +85,43 @@ void launch_silu_half(const half* input, half* output, int n, cudaStream_t strea
     int block_size = 256;
     int grid_size = (n + block_size - 1) / block_size;
     silu_half_kernel<<<grid_size, block_size, 0, stream>>>(input, output, n);
+}
+
+// ============================================================
+// Activation forward (bf16: bf16 in -> fp32 math -> bf16 out)
+// ============================================================
+
+// --- GELU (bf16) ---
+__global__ void gelu_bf16_kernel(const __nv_bfloat16* input, __nv_bfloat16* output, int n) {
+    int idx = blockIdx.x * blockDim.x + threadIdx.x;
+    if (idx < n) output[idx] = __float2bfloat16(gelu_device(__bfloat162float(input[idx])));
+}
+void launch_gelu_bf16(const __nv_bfloat16* input, __nv_bfloat16* output, int n, cudaStream_t stream) {
+    int block_size = 256;
+    int grid_size = (n + block_size - 1) / block_size;
+    gelu_bf16_kernel<<<grid_size, block_size, 0, stream>>>(input, output, n);
+}
+
+// --- ReLU (bf16) ---
+__global__ void relu_bf16_kernel(const __nv_bfloat16* input, __nv_bfloat16* output, int n) {
+    int idx = blockIdx.x * blockDim.x + threadIdx.x;
+    if (idx < n) output[idx] = __float2bfloat16(fmaxf(0.0f, __bfloat162float(input[idx])));
+}
+void launch_relu_bf16(const __nv_bfloat16* input, __nv_bfloat16* output, int n, cudaStream_t stream) {
+    int block_size = 256;
+    int grid_size = (n + block_size - 1) / block_size;
+    relu_bf16_kernel<<<grid_size, block_size, 0, stream>>>(input, output, n);
+}
+
+// --- SiLU (bf16) ---
+__global__ void silu_bf16_kernel(const __nv_bfloat16* input, __nv_bfloat16* output, int n) {
+    int idx = blockIdx.x * blockDim.x + threadIdx.x;
+    if (idx < n) output[idx] = __float2bfloat16(silu_device(__bfloat162float(input[idx])));
+}
+void launch_silu_bf16(const __nv_bfloat16* input, __nv_bfloat16* output, int n, cudaStream_t stream) {
+    int block_size = 256;
+    int grid_size = (n + block_size - 1) / block_size;
+    silu_bf16_kernel<<<grid_size, block_size, 0, stream>>>(input, output, n);
 }
 
 // ============================================================

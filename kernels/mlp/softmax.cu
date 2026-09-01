@@ -9,19 +9,22 @@
 
 #include <cuda_runtime.h>
 #include <cuda_fp16.h>
+#include <cuda_bf16.h>
 #include <cfloat>
 #include <cmath>
 #include <type_traits>
 
-// 标量读写：内部一律 fp32 计算；fp16 走 upcast/downcast（与 matmul_half 数值约定一致）
+// 标量读写：内部一律 fp32 计算；fp16/bf16 走 upcast/downcast（与 matmul_half 数值约定一致）
 template <typename T>
 __device__ __forceinline__ float softmax_to_f(T v) {
     if constexpr (std::is_same_v<T, half>) return __half2float(v);
+    else if constexpr (std::is_same_v<T, __nv_bfloat16>) return __bfloat162float(v);
     else return v;
 }
 template <typename T>
 __device__ __forceinline__ T softmax_from_f(float v) {
     if constexpr (std::is_same_v<T, half>) return __float2half(v);
+    else if constexpr (std::is_same_v<T, __nv_bfloat16>) return __float2bfloat16(v);
     else return v;
 }
 
@@ -109,4 +112,15 @@ void launch_softmax_half(
     int n_warps = (block_size + 31) / 32;
     int smem = n_warps * 2 * sizeof(float);
     softmax_kernel<half><<<M, block_size, smem, stream>>>(input, output, M, N);
+}
+
+void launch_softmax_bf16(
+    const __nv_bfloat16* input, __nv_bfloat16* output,
+    int M, int N, cudaStream_t stream)
+{
+    int block_size = (N + 31) / 32 * 32;
+    if (block_size > 1024) block_size = 1024;
+    int n_warps = (block_size + 31) / 32;
+    int smem = n_warps * 2 * sizeof(float);
+    softmax_kernel<__nv_bfloat16><<<M, block_size, smem, stream>>>(input, output, M, N);
 }

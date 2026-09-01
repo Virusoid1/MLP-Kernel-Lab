@@ -12,7 +12,7 @@ SwiGLU MLP block 的 fp16 正确性在 **六后端全闭环**（eager/triton/tri
 | eager（参考） | ✅ | ✅ |
 | triton | ✅ | ✅ |
 | triton_fused | ✅ | ✅ |
-| cuda（matmul_half） | ✅ | fp32-only（binding）|
+| cuda（matmul_half） | ✅ | 算子级 ✅（bf16 kernels 2026-09-02 解锁）；块级 matmul fp32-only |
 | cutile（dtype 传播修复后）| ✅ | ✅ |
 | compile | ✅ | ✅ |
 
@@ -31,6 +31,6 @@ triton 4.60 < compile 6.42 < triton_fused 7.02 < cutile 11.8（tile 优化后）
 ## 复现
 
 ```bash
-make reproduce PYTHON=<venv>/bin/python   # 213 tests (181p/0f/32s, 93050de 冻结)
+make reproduce PYTHON=<venv>/bin/python   # 213 tests (186p/0f/27s, 30187f2 冻结)
 python bench/run.py --suite prefill --dtypes fp16 --backends eager,concat,triton,triton_fused,cuda,cutile,compile
 ```
