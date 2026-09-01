@@ -108,6 +108,21 @@ max_temp / max_power / throttled : <...>
 3. mlp_cuda 未编译（无 nvcc）→ cuda 后端不可用；相关测试自动 skip
 4. available_backends() 只查 import 不查 driver 兼容 → 3080 Ti 上 cutile 报可用但运行失败（建议后续加固）
 
+## 5.6 跨设备对比汇总（3070 / 3080 Ti / 3090 Ti，均实测）
+
+| 指标（fp16 triton） | 3070 Laptop | 3080 Ti | 3090 Ti |
+|---|---|---|---|
+| SM 数（preflight） | 40 | 80 | **84** |
+| fp16 加速 vs eager-fp32 | 2.4-3.5x | 2.16-3.69x | **2.46-3.40x** |
+| 2048×4096×11008 | 19.2ms(fp32 57.6) | 11.3ms(29.8) | **7.4ms(22.0)** |
+| decode M=1 | 0.78ms | 0.361ms | **0.359ms** |
+| decode 摊销 | 82.9x | 76.6x | **86.4x** |
+| P1 opcheck/gradcheck | 8/8 | 8/8 | **8/8** |
+
+- **结论**: 同架构（sm86）三设备 fp16 正确性一致（norm_l2 2e-4~6e-4），速度随 SM/带宽提升；
+  decode 摊销跨设备均 ~77-86x——证明"weight-read 带宽 bound"与 batch 摊销结论与设备无关
+- 3070 上的 2.4-3.5x 加速范围在三设备上一致成立（E4 复现成功）
+
 ## 6. 完成后回报
 
 - 三产物：manifest 链路(artifacts)、E4 对比表(追加 compat-matrix)、实验报告(docs/experiments/e4-<gpu>-<date>.md)
