@@ -20,7 +20,7 @@
 \`\`\`bash
 python tools/preflight.py          # 检查 lane/arch/toolchain，status=0 才能继续
 pip install -r requirements.txt    # cuTile 可选: pip install cuda-tile
-make reproduce PYTHON=<venv>/bin/python   # 构建 -> 136 测试 -> bench -> manifest 归档
+make reproduce PYTHON=<venv>/bin/python   # 构建 -> 235 tests (216p) -> bench -> manifest 归档
 python bench/run.py --suite all --dtypes fp32,fp16   # SwiGLU 全 shape sweep
 python bench/run.py --suite decode --dtypes fp16     # decode 档
 \`\`\`
