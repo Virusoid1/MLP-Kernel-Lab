@@ -12,7 +12,7 @@
 - **四/五后端对比**：PyTorch (cuBLAS) / torch.compile / Triton / CUDA / cuTile，同一 workload
 - **SwiGLU MLP block 主线**：**跨精度**（FP16 Triton vs FP32 eager）吞吐比最高 **3.37x**、all-suite best 3.52x；但**同精度**（FP16 Triton vs FP16 eager）仅 **1.01-1.17x**（median 1.4%）。roofline 26.7 TFLOPS = 86% fp16-TC 峰值；decode 带宽 bound（利用率 13-20%，摊销 82.9x）
 - **可追溯结果**：`make reproduce` 一键产出 manifest（commit/dirty/GPU/driver/依赖版本）+ correctness.jsonl + benchmark.json
-- **正确性矩阵**：**226 项 pytest**（199 passed / 0 failed，SwiGLU block 多后端 × shape × dtype + 支持矩阵 + P1 opcheck/gradcheck（swiglu+matmul+layernorm）+ fp16/bf16 训练闭环）；strict FP32 reference 协议；cuda 算子级 fp16+bf16（swiglu/softmax/relu/gelu/silu）已解锁
+- **正确性矩阵**：**226 项 pytest**（203 passed / 0 failed，SwiGLU block 多后端 × shape × dtype + 支持矩阵 + P1 opcheck/gradcheck（swiglu+matmul+layernorm）+ fp16/bf16 训练闭环）；strict FP32 reference 协议；cuda 算子级 fp16+bf16 已解锁（含块级 bf16 WMMA matmul）
 - **CUDA kernel**：naive / tiled / fused / WMMA FP16（matmul_half, L2 2e-4）/ LayerNorm 多版本
 - **精度控制**：TF32 / FP32 全局切换 + fp16/bf16 支持矩阵（`tests/test_transformer_mlp.py::DTYPE_SUPPORT`）
 

@@ -14,7 +14,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 EXPECTED_TESTS = 226
-EXPECTED_PASSED = 199  # 2026-09-02 冻结: 7e09c72（+13 = P1 matmul/layernorm 注册测试）
+EXPECTED_PASSED = 203  # 2026-09-02 冻结: f43dec8（+4 = cuda bf16 全自定义: matmul_bf16 + 块级 bf16 行）
 MIN_PASSED = 170  # 至少 170 passed（允许未来加测试但不应回落过多）
 
 

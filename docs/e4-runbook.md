@@ -54,7 +54,7 @@ make verify PYTHON=$(which python)
 ## 3. 全量复现（E4 主证据）
 
 ```bash
-make reproduce PYTHON=$(which python)   # build + 213 tests + bench smoke + manifest
+make reproduce PYTHON=$(which python)   # build + 226 tests + bench smoke + manifest
 
 python bench/run.py --suite all --dtypes fp32,fp16 --backends eager,concat,triton,triton_fused,cuda,cutile,compile --warmup 20 --iters 100
 
