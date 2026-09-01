@@ -8,6 +8,7 @@
  */
 
 #include <cuda_runtime.h>
+#include <cuda_fp16.h>
 #include "device_utils.cuh"
 
 // ============================================================
@@ -45,6 +46,44 @@ void launch_silu(const float* input, float* output, int n, cudaStream_t stream) 
     int block_size = 256;
     int grid_size = (n + block_size - 1) / block_size;
     silu_kernel<<<grid_size, block_size, 0, stream>>>(input, output, n);
+}
+
+// ============================================================
+// Activation forward (fp16: fp16 in -> fp32 math -> fp16 out)
+// 与 matmul_half 数值约定一致（fp16 存储, fp32 计算, fp16 回写）。
+// ============================================================
+
+// --- GELU (fp16) ---
+__global__ void gelu_half_kernel(const half* input, half* output, int n) {
+    int idx = blockIdx.x * blockDim.x + threadIdx.x;
+    if (idx < n) output[idx] = __float2half(gelu_device(__half2float(input[idx])));
+}
+void launch_gelu_half(const half* input, half* output, int n, cudaStream_t stream) {
+    int block_size = 256;
+    int grid_size = (n + block_size - 1) / block_size;
+    gelu_half_kernel<<<grid_size, block_size, 0, stream>>>(input, output, n);
+}
+
+// --- ReLU (fp16) ---
+__global__ void relu_half_kernel(const half* input, half* output, int n) {
+    int idx = blockIdx.x * blockDim.x + threadIdx.x;
+    if (idx < n) output[idx] = __float2half(fmaxf(0.0f, __half2float(input[idx])));
+}
+void launch_relu_half(const half* input, half* output, int n, cudaStream_t stream) {
+    int block_size = 256;
+    int grid_size = (n + block_size - 1) / block_size;
+    relu_half_kernel<<<grid_size, block_size, 0, stream>>>(input, output, n);
+}
+
+// --- SiLU (fp16) ---
+__global__ void silu_half_kernel(const half* input, half* output, int n) {
+    int idx = blockIdx.x * blockDim.x + threadIdx.x;
+    if (idx < n) output[idx] = __float2half(silu_device(__half2float(input[idx])));
+}
+void launch_silu_half(const half* input, half* output, int n, cudaStream_t stream) {
+    int block_size = 256;
+    int grid_size = (n + block_size - 1) / block_size;
+    silu_half_kernel<<<grid_size, block_size, 0, stream>>>(input, output, n);
 }
 
 // ============================================================

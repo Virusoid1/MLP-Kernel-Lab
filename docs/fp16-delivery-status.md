@@ -24,7 +24,7 @@ triton 4.60 < compile 6.42 < triton_fused 7.02 < cutile 11.8（tile 优化后）
 
 ## 边界（已知限制）
 
-1. **算子级 CUDA fp16**：swiglu/softmax 等算子仍被 binding CHECK_FLOAT32 阻塞；块级用它不依赖（epilogue 用 PyTorch F.silu，matmul 用 matmul_half）
+1. ~~**算子级 CUDA fp16**~~：~~swiglu/softmax 等算子仍被 binding CHECK_FLOAT32 阻塞；块级用它不依赖（epilogue 用 PyTorch F.silu，matmul 用 matmul_half）~~ **已解锁（2026-09-02）**：binding fp16 分派 + half kernels（swiglu_fused/softmax/relu/gelu/silu，fp16 in→fp32 math→fp16 out）；cuda fp16 block 全自定义（matmul_half + swiglu_fused_half），不再回退 F.silu，norm_l2 5e-4（dtype matrix cuda-fp16 5 行 PASSED）
 2. **cuda bf16**：matmul_half 仅 fp16，bf16 走 fp32 tiled（正确但慢）
 3. **Triton bf16 sigmoid**：已升 fp32 修复（silu/swiglu 均 OK）
 

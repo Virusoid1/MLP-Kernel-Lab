@@ -99,7 +99,9 @@ def swiglu_block_cuda(x: torch.Tensor, w_gate: torch.Tensor, w_up: torch.Tensor,
         mm = mlp_cuda.matmul_half
         gate = mm(x, w_gate)
         up = mm(x, w_up)
-        hidden = torch.nn.functional.silu(gate) * up  # F.silu 支持 fp16（mlp_cuda.silu 仅 fp32）
+        # fp16 swiglu_fused（v2 4.x：mlp_cuda.swiglu_fused 已支持 fp16，
+        # fp16 in→fp32 math→fp16 out，与 matmul_half 数值约定一致）——不再回退 F.silu
+        hidden = mlp_cuda.swiglu_fused(gate, up)
         return mm(hidden, w_down)
     gate = mlp_cuda.matmul_tiled_auto(x, w_gate)
     up = mlp_cuda.matmul_tiled_auto(x, w_up)

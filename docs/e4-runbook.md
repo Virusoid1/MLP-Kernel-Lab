@@ -160,6 +160,7 @@ max_temp / max_power / throttled : <...>
 - **Blackwell 结论**：跨代正确性（六后端 + P1）完全成立；性能上 triton fp16 大 shape 3x vs fp32（跨精度），但**同精度 vs cuBLAS 无显著优势**（Blackwell cuBLAS 更强）；decode 摊销到 125x。
 - cutile 在 Blackwell driver 610 下**可用**（cutile_probe=True），六后端在单设备上全可用。
 - **cuda 后端（mlp_cuda）后续已在本机为 sm120 单独编译**（`TORCH_CUDA_ARCH_LIST=12.0 setup.py build_ext --inplace`，nvcc 13.2）：transformer_mlp -k cuda 15p/2s、原算子 cuda_kernels 16p、P1 8/8；fp16 prefill 三后端（eager/triton/cuda）18 rows 正确性 100%，cuda 后端 fp16 在 Blackwell 仍慢于 cuBLAS（M2048 34.7ms vs eager 6.1ms），如实记录。证据 = artifacts_5070ti/fp16_prefill_cuda_5070ti.json。
+- **fp16 算子解锁（2026-09-02, 双架构验证）**：mlp_cuda 增 swiglu_fused/softmax/relu/gelu/silu 的 fp16 分派（fp16 in→fp32 math→fp16 out）；3070(sm86) 与 5070 Ti(sm120) dtype-matrix cuda-fp16 均为 **5 行 PASSED**；cuda fp16 block 不再回退 F.silu（norm_l2 5e-4）。
 
 ## 6. 完成后回报
 

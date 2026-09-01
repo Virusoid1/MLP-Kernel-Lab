@@ -7,7 +7,7 @@
 
 | 项 | 状态 | 影响 |
 |---|---|---|
-| CUDA 算子级 fp16（swiglu/softmax 等） | binding CHECK_FLOAT32 阻塞；仅 matmul_half 解锁 | 不影响块级主线（fp16 epilogue 用 PyTorch F.silu）；MNIST 历史算子集受限 |
+| ~~CUDA 算子级 fp16（swiglu/softmax 等）~~ | **已解锁（2026-09-02）：binding 增 fp16 分派 + half kernels（swiglu_fused / softmax / relu / gelu / silu，fp16 in→fp32 math→fp16 out）**，3070 sm86 验证 | ~~blocked~~ ✅ 已解锁：dtype matrix cuda-fp16 5 行 PASSED；cuda fp16 block 不再回退 F.silu（norm_l2 5e-4，亲测） |
 | cuda bf16 | matmul_half 仅 fp16；bf16 走 fp32 tiled（正确但慢） | 四后端 bf16 中 cuda 是短板 |
 | torch.library 集成仅覆盖 swiglu | 未推广到 matmul/layernorm | 证明链已完整，推广是工作量扩展 |
 | 多 GPU / FP8 | 有意不做 | 超出 kernel 项目范围 |

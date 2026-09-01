@@ -38,10 +38,18 @@ void launch_mlp_fused_first_layer(
 void launch_swiglu_fused(
     const float* gate, const float* up, float* output,
     int total_elements, cudaStream_t stream);
+void launch_swiglu_fused_half(
+    const half* gate, const half* up, half* output,
+    int total_elements, cudaStream_t stream);
 
 void launch_gelu(const float* input, float* output, int n, cudaStream_t stream);
 void launch_relu(const float* input, float* output, int n, cudaStream_t stream);
 void launch_silu(const float* input, float* output, int n, cudaStream_t stream);
+
+// fp16 变体（cuda 算子级 fp16 解锁，v2 4.x）
+void launch_gelu_half(const half* input, half* output, int n, cudaStream_t stream);
+void launch_relu_half(const half* input, half* output, int n, cudaStream_t stream);
+void launch_silu_half(const half* input, half* output, int n, cudaStream_t stream);
 
 void launch_gelu_backward(
     const float* grad_output, const float* input, float* grad_input,
@@ -94,6 +102,9 @@ void launch_layernorm_backward(
 
 void launch_softmax(
     const float* input, float* output,
+    int M, int N, cudaStream_t stream);
+void launch_softmax_half(
+    const half* input, half* output,
     int M, int N, cudaStream_t stream);
 
 void launch_maxpool2d(
@@ -231,28 +242,52 @@ torch::Tensor bias_add(torch::Tensor x, torch::Tensor bias) {
 
 // --- GELU ---
 torch::Tensor gelu(torch::Tensor x) {
-    CHECK_CUDA(x); CHECK_CONTIGUOUS(x); CHECK_FLOAT32(x);
+    CHECK_CUDA(x); CHECK_CONTIGUOUS(x);
     auto output = torch::empty_like(x);
-    launch_gelu(x.data_ptr<float>(), output.data_ptr<float>(), x.numel(),
-                _get_cuda_stream(x));
+    if (x.scalar_type() == torch::kHalf) {
+        launch_gelu_half(
+            reinterpret_cast<const half*>(x.data_ptr<at::Half>()),
+            reinterpret_cast<half*>(output.data_ptr<at::Half>()),
+            x.numel(), _get_cuda_stream(x));
+    } else {
+        CHECK_FLOAT32(x);
+        launch_gelu(x.data_ptr<float>(), output.data_ptr<float>(), x.numel(),
+                    _get_cuda_stream(x));
+    }
     return output;
 }
 
 // --- ReLU ---
 torch::Tensor relu(torch::Tensor x) {
-    CHECK_CUDA(x); CHECK_CONTIGUOUS(x); CHECK_FLOAT32(x);
+    CHECK_CUDA(x); CHECK_CONTIGUOUS(x);
     auto output = torch::empty_like(x);
-    launch_relu(x.data_ptr<float>(), output.data_ptr<float>(), x.numel(),
-                _get_cuda_stream(x));
+    if (x.scalar_type() == torch::kHalf) {
+        launch_relu_half(
+            reinterpret_cast<const half*>(x.data_ptr<at::Half>()),
+            reinterpret_cast<half*>(output.data_ptr<at::Half>()),
+            x.numel(), _get_cuda_stream(x));
+    } else {
+        CHECK_FLOAT32(x);
+        launch_relu(x.data_ptr<float>(), output.data_ptr<float>(), x.numel(),
+                    _get_cuda_stream(x));
+    }
     return output;
 }
 
 // --- SiLU ---
 torch::Tensor silu(torch::Tensor x) {
-    CHECK_CUDA(x); CHECK_CONTIGUOUS(x); CHECK_FLOAT32(x);
+    CHECK_CUDA(x); CHECK_CONTIGUOUS(x);
     auto output = torch::empty_like(x);
-    launch_silu(x.data_ptr<float>(), output.data_ptr<float>(), x.numel(),
-                _get_cuda_stream(x));
+    if (x.scalar_type() == torch::kHalf) {
+        launch_silu_half(
+            reinterpret_cast<const half*>(x.data_ptr<at::Half>()),
+            reinterpret_cast<half*>(output.data_ptr<at::Half>()),
+            x.numel(), _get_cuda_stream(x));
+    } else {
+        CHECK_FLOAT32(x);
+        launch_silu(x.data_ptr<float>(), output.data_ptr<float>(), x.numel(),
+                    _get_cuda_stream(x));
+    }
     return output;
 }
 
@@ -331,15 +366,25 @@ torch::Tensor mlp_fused_first_layer(
 torch::Tensor swiglu_fused(torch::Tensor gate, torch::Tensor up) {
     CHECK_CUDA(gate); CHECK_CUDA(up);
     CHECK_CONTIGUOUS(gate); CHECK_CONTIGUOUS(up);
-    CHECK_FLOAT32(gate); CHECK_FLOAT32(up);
+    TORCH_CHECK(gate.scalar_type() == up.scalar_type(),
+                "gate and up must have same dtype; got ", gate.scalar_type(), " vs ", up.scalar_type());
 
     TORCH_CHECK(gate.sizes() == up.sizes(),
                 "gate and up must have same shape; got ", gate.sizes(), " vs ", up.sizes());
 
     auto output = torch::empty_like(gate);
-    launch_swiglu_fused(
-        gate.data_ptr<float>(), up.data_ptr<float>(), output.data_ptr<float>(),
-        gate.numel(), _get_cuda_stream(gate));
+    if (gate.scalar_type() == torch::kHalf) {
+        launch_swiglu_fused_half(
+            reinterpret_cast<const half*>(gate.data_ptr<at::Half>()),
+            reinterpret_cast<const half*>(up.data_ptr<at::Half>()),
+            reinterpret_cast<half*>(output.data_ptr<at::Half>()),
+            gate.numel(), _get_cuda_stream(gate));
+    } else {
+        CHECK_FLOAT32(gate); CHECK_FLOAT32(up);
+        launch_swiglu_fused(
+            gate.data_ptr<float>(), up.data_ptr<float>(), output.data_ptr<float>(),
+            gate.numel(), _get_cuda_stream(gate));
+    }
     return output;
 }
 
@@ -483,14 +528,22 @@ std::tuple<torch::Tensor, torch::Tensor, torch::Tensor> layernorm_backward(
 // ============================================================
 
 torch::Tensor softmax(torch::Tensor x) {
-    CHECK_CUDA(x); CHECK_CONTIGUOUS(x); CHECK_FLOAT32(x);
+    CHECK_CUDA(x); CHECK_CONTIGUOUS(x);
     TORCH_CHECK(x.dim() == 2, "x must be 2D (M, N)");
 
     int M = x.size(0), N = x.size(1);
     auto output = torch::empty_like(x);
-    launch_softmax(
-        x.data_ptr<float>(), output.data_ptr<float>(),
-        M, N, _get_cuda_stream(x));
+    if (x.scalar_type() == torch::kHalf) {
+        launch_softmax_half(
+            reinterpret_cast<const half*>(x.data_ptr<at::Half>()),
+            reinterpret_cast<half*>(output.data_ptr<at::Half>()),
+            M, N, _get_cuda_stream(x));
+    } else {
+        CHECK_FLOAT32(x);
+        launch_softmax(
+            x.data_ptr<float>(), output.data_ptr<float>(),
+            M, N, _get_cuda_stream(x));
+    }
     return output;
 }
 
