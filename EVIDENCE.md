@@ -37,6 +37,7 @@
 | E4 第二设备复现（3080 Ti, 2026-09-01） | `docs/e4-runbook.md` §5.5 + claim-matrix E4 行 | **fp16 Triton 2.16x-3.69x vs eager-fp32，正确性/P1 同 arch 复现成功**（cutile/cuda 边界为 driver/nvcc 限制，如实记录） | E4 |
 | E4 第二设备复现（3090 Ti, 2026-09-01） | `docs/e4-runbook.md` §5.6 + claim-matrix E4 行 | **fp16 Triton 2.46x-3.40x vs eager-fp32；2048-shape 2.97x；P1 8/8；correctness 43p** | E4 |
 | E4 跨代复现（5070 Ti Blackwell, 2026-09-02） | `docs/e4-runbook.md` §5.8 + claim-matrix E4 行 + `artifacts_5070ti/` | **fp16 Triton 2.62x-3.00x vs eager-fp32；decode 摊销 125.2x；P1 8/8；correctness 60p** | E4 |
+| cuda 后端 Blackwell 单独编译（sm120） | `TORCH_CUDA_ARCH_LIST=12.0 setup.py build_ext --inplace`（nvcc 13.2）→ `mlp_cuda.cpython-312-...so` | **import OK on 5070 Ti；transformer_mlp -k cuda 15p/2s；cuda_kernels 16p；P1 8/8；fp16 prefill 正确性 100%**；cuda fp16 性能仍慢于 cuBLAS（如实记录） | E2→E4 |
 | 构建隔离 | `setup.py` build_base | build/py312-torch2.11.0-sm86/（架构不互污染）| E2 |
 
 ## 失败案例 / 负结果（面试重点）
