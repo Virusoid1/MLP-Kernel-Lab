@@ -70,6 +70,7 @@ setup(
                 'kernels/mlp/softmax.cu',
                 'kernels/mlp/pool_im2col.cu',
                 'kernels/mlp/matmul_half.cu',
+                'kernels/mlp/matmul_bf16.cu',
             ],
             include_dirs=['kernels/mlp'],
             extra_compile_args={

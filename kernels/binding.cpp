@@ -86,6 +86,10 @@ void launch_matmul_half(
     const half* A, const half* B, half* C,
     int M, int K, int N, cudaStream_t stream);
 
+void launch_matmul_bf16(
+    const __nv_bfloat16* A, const __nv_bfloat16* B, __nv_bfloat16* C,
+    int M, int K, int N, cudaStream_t stream);
+
 void launch_gelu_backward_vec4(
     const float* grad_output, const float* input, float* grad_input,
     int n, cudaStream_t stream);
@@ -222,6 +226,25 @@ torch::Tensor matmul_half(torch::Tensor A, torch::Tensor B) {
         reinterpret_cast<const half*>(A.data_ptr<at::Half>()),
         reinterpret_cast<const half*>(B.data_ptr<at::Half>()),
         reinterpret_cast<half*>(C.data_ptr<at::Half>()),
+        M, K, N, _get_cuda_stream(A));
+    return C;
+}
+
+// matmul_bf16: bf16 TensorCore matmul（bf16 in → fp32 acc → bf16 out）
+torch::Tensor matmul_bf16(torch::Tensor A, torch::Tensor B) {
+    CHECK_CUDA(A); CHECK_CUDA(B);
+    CHECK_CONTIGUOUS(A); CHECK_CONTIGUOUS(B);
+    TORCH_CHECK(A.scalar_type() == torch::kBFloat16, "A must be bfloat16 for matmul_bf16");
+    TORCH_CHECK(B.scalar_type() == torch::kBFloat16, "B must be bfloat16 for matmul_bf16");
+
+    int M = A.size(0), K = A.size(1), N = B.size(1);
+    TORCH_CHECK(A.size(1) == B.size(0), "Shape mismatch: A(", M, ",", K, ") @ B(", B.size(0), ",", N, ")");
+
+    auto C = torch::empty({M, N}, A.options());
+    launch_matmul_bf16(
+        reinterpret_cast<const __nv_bfloat16*>(A.data_ptr<at::BFloat16>()),
+        reinterpret_cast<const __nv_bfloat16*>(B.data_ptr<at::BFloat16>()),
+        reinterpret_cast<__nv_bfloat16*>(C.data_ptr<at::BFloat16>()),
         M, K, N, _get_cuda_stream(A));
     return C;
 }
@@ -712,6 +735,7 @@ PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {
           py::arg("A"), py::arg("B"),
           py::arg("BLOCK_M") = 16, py::arg("BLOCK_N") = 16, py::arg("BLOCK_K") = 16);
     m.def("matmul_half", &matmul_half, "fp16 TensorCore matmul (fp16 in -> fp32 acc -> fp16 out)");
+    m.def("matmul_bf16", &matmul_bf16, "bf16 TensorCore matmul (bf16 in -> fp32 acc -> bf16 out)");
     m.def("matmul_tiled_auto", &matmul_tiled_auto,
           "Auto-tiled CUDA matmul C = A @ B (adaptive block sizes)");
     m.def("matmul_transB", &matmul_transB,

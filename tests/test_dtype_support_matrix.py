@@ -65,7 +65,9 @@ BACKEND_CALLS = {
         "fused_mlp_first": lambda d, x, w, b: __import__("triton_kernels.mlp_triton", fromlist=["mlp_first_layer_triton"]).mlp_first_layer_triton(x, w, b),
     },
     "cuda": {
-        "matmul": lambda d, a, b: __import__("mlp_cuda").matmul_tiled_auto(a, b),
+        "matmul": lambda d, a, b: (__import__("mlp_cuda").matmul_half(a, b) if d == torch.float16
+                                     else __import__("mlp_cuda").matmul_bf16(a, b) if d == torch.bfloat16
+                                     else __import__("mlp_cuda").matmul_tiled_auto(a, b)),
         "bias_add": lambda d, a, b: __import__("mlp_cuda").bias_add(a, b),
         "relu": lambda d, x: __import__("mlp_cuda").relu(x),
         "gelu": lambda d, x: __import__("mlp_cuda").gelu(x),
