@@ -14,7 +14,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 EXPECTED_TESTS = 226
-EXPECTED_PASSED = 203  # 2026-09-02 冻结: f43dec8（+4 = cuda bf16 全自定义: matmul_bf16 + 块级 bf16 行）
+EXPECTED_PASSED = 207  # 2026-09-02 冻结: 3cebeee（+4 = bias_add/fused_first fp16+bf16）
 MIN_PASSED = 170  # 至少 170 passed（允许未来加测试但不应回落过多）
 
 

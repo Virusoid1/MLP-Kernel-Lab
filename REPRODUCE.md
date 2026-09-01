@@ -64,7 +64,7 @@ python tools/preflight.py
 
 | 项 | 预期 |
 |---|---|
-| make reproduce | **226 tests: 203 passed / 0 failed / 23 skipped**（f43dec8 冻结；+4 = cuda bf16 全自定义） |
+| make reproduce | **226 tests: 207 passed / 0 failed / 19 skipped**（3cebeee 冻结；+4 = bias_add/fused_first fp16+bf16） |
 | fp16 六后端正确性 | norm_l2 2.4e-4 ~ 6e-4（eager/triton/triton_fused/cuda/cutile/compile） |
 | fp16 Triton 加速 | all-suite 266-case best **3.52x** vs eager-fp32（prefill/train M≥512 2.4-3.5x） |
 | 热状态（大负载） | 73°C / 139.8W / util 100% / throttled=true（笔记本节流事实） |
