@@ -8,6 +8,15 @@
 - **E4** = 在不同 GPU 上复现 E2/E3 结果，证明结论不依赖单设备
 - 目标机器：3080 Ti (sm86) / 3090 Ti (sm86, Ampere) / **5070 Ti (sm120, Blackwell)**
 - 3070 Laptop (sm86) 已 E2/E3 验证；E4 重点 = 同架构第二设备 + Blackwell 跨代
+- **3080 Ti 预期差异（vs 3070 Laptop，同架构 sm86，数字以实机 preflight+reproduce 为准）**：
+
+| 属性 | 3070 Laptop | 3080 Ti (桌面) | 对结果的影响 |
+|---|---|---|---|
+| SM 数 | 40 | **80（2x）** | fp16 TFLOPS 应 ~2x（Triton roofline 86% 上限可能到 ~50-55 TFLOPS） |
+| 显存带宽 | 448 GB/s | **912 GB/s（2x）** | decode 权重读 42-91→~90-180 GB/s；带宽 bound 结论不变 |
+| VRAM | 8 GB | **12 GB** | 可跑更大 shape（M≥4096 压力测试）|
+| 功耗/TGP | ~139.8W 实测（节流） | ~350W 桌面（散热充裕） | 数字更稳定；节流不构成变量 |
+| decode 摊销 | 82.9x（M1→M256 实测） | 预期更大（带宽 2x + 权重复用） | E4 重点复核指标 |
 
 ## 1. 事前准备
 

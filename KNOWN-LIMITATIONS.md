@@ -27,7 +27,7 @@
 | 限制 | 影响 |
 |---|---|
 | 8GB VRAM | 大 shape（M≥4096×4096×11008）压力测试受限；留给 3090 Ti |
-| HBM 带宽（~250GB/s） | 单 token decode 物理限制（~0.75ms/token 全成本）；多 token 摊销 ↓80x 是解法 |
+| 显存带宽（3070 Laptop 理论 448 GB/s；decode 实测利用仅 13-20%） | 单 token decode 物理限制（每次重读全部权重）；多 token 摊销 ↓82.9x 是解法 |
 | WSL2 环境 | ncu/nsys 权限、热漂移、性能波动需插电+固定模式 |
 | 40 SM | 大 tile 配置受 SM 数限制（与 5070 Ti 96 SM 不同最优解） |
 
