@@ -33,6 +33,7 @@
 | make reproduce 一键复现 | `tools/reproduce.py` + `Makefile` | build→test→bench→manifest 全自动（含 CUDA 工具链自动探测）| E3 |
 | Manifest 完整（commit/dirty/GPU/deps） | `artifacts/<run-id>/manifest.json` | capture_metadata 补足 triton/cutile/nvcc/git_dirty | E3 |
 | 多机构建（Ampere/Blackwell） | `tools/preflight.py` + `docs/compatibility-matrix.md` | 3070 实测 status=0（Ampere lane）；3080Ti/3090Ti/5070Ti 代码就绪待实机 | E4(待) |
+| E4 第二设备复现（3080 Ti, 2026-09-01） | `docs/e4-runbook.md` §5.5 + claim-matrix E4 行 | **fp16 Triton 2.16x-3.69x vs eager-fp32，正确性/P1 同 arch 复现成功**（cutile/cuda 边界为 driver/nvcc 限制，如实记录） | E4 |
 | 构建隔离 | `setup.py` build_base | build/py312-torch2.11.0-sm86/（架构不互污染）| E2 |
 
 ## 失败案例 / 负结果（面试重点）

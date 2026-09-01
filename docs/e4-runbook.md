@@ -87,6 +87,25 @@ max_temp / max_power / throttled : <...>
 - Triton fp16 应更进一步；decode 带宽物理上限仍适用
 - 若 cutile tile (32,64,32) 在 Blackwell 非最优：用 tile sweep 实验重选（见 claim-matrix cutile 行）
 
+
+## 5.5 3080 Ti 实测记录（2026-09-01，host c3d5ff0d7eeb，双卡）
+
+**环境**: driver 535.104.05 / torch 2.9.1+cu126 / triton 3.5.1 / Python 3.12.3 / 无 sudo / 无 git / 无 nvcc
+**部署**: scp 拷贝仓库 + 用户 site-packages（cuda-tile tar + pytest + Python.h via CPATH）
+
+| 项 | 3070 Laptop | **3080 Ti（实测）** |
+|---|---|---|
+| fp16 Triton 加速 vs eager-fp32 | 2.4-3.5x | **2.16x-3.69x**（prefill 6 shapes） |
+| 512×4096×11008 fp16 triton | 4.60ms | **2.76ms（1.67x）** |
+| fp16 正确性 | norm_l2 2e-4~6e-4 | **同档（transformer_mlp 42p + P1 8/8 + dtype 16p）** |
+| P1 opcheck/gradcheck | 8/8 | **8/8** |
+
+**环境边界发现**（E4 价值：跨设备差异）:
+1. Triton 需 CPATH 指向既有 Python.h（远程 py312-headers）
+2. cuda-tile 1.x 要求 driver ≥r580；**3080 Ti driver 535 不兼容 → cutile 不可用**（3070 driver 610 OK）
+3. mlp_cuda 未编译（无 nvcc）→ cuda 后端不可用；相关测试自动 skip
+4. available_backends() 只查 import 不查 driver 兼容 → 3080 Ti 上 cutile 报可用但运行失败（建议后续加固）
+
 ## 6. 完成后回报
 
 - 三产物：manifest 链路(artifacts)、E4 对比表(追加 compat-matrix)、实验报告(docs/experiments/e4-<gpu>-<date>.md)
