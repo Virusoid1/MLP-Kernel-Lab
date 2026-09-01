@@ -160,7 +160,30 @@ def available_backends() -> list[str]:
     try:
         import cuda.tile  # noqa: F401
         from cutile_kernels.matmul import cutile_matmul  # noqa: F401
-        out.append("cutile")
+        # 加固（E4 3080 Ti 发现）：import 成功 ≠ driver 兼容。
+        # cuda-tile 要求 driver ≥ r580（CUDA 13）：driver 过低时 import 可过但实际调用失败。
+        # 用一次最小 ct.launch 探测真实可用性，失败则视为不可用（如 535 driver 的 3080 Ti）。
+        if _cutile_driver_ok():
+            out.append("cutile")
     except Exception:
         pass
     return out
+
+
+def _cutile_driver_ok() -> bool:
+    """探测 cutile 在真实调用层面是否可用（driver 兼容性）。失败返回 False，不抛异常。
+
+    用仓库已验证的 cutile_matmul 做 16x32@32x64 最小真实调用：
+    - driver 过低（如 r535 < cuda-tile 要求 r580）：ct.launch 抛异常 → False
+    - 兼容环境（如 3070 driver 610）：正常返回 → True
+    """
+    try:
+        import torch
+        from cutile_kernels.matmul import cutile_matmul
+        a = torch.randn(16, 32, device="cuda")
+        b = torch.randn(32, 64, device="cuda")
+        c = cutile_matmul(a, b)
+        torch.cuda.synchronize()
+        return c.shape == (16, 64)
+    except Exception:
+        return False
