@@ -99,6 +99,8 @@ max_temp / max_power / throttled : <...>
 | 512×4096×11008 fp16 triton | 4.60ms | **2.76ms（1.67x）** |
 | fp16 正确性 | norm_l2 2e-4~6e-4 | **同档（transformer_mlp 42p + P1 8/8 + dtype 16p）** |
 | P1 opcheck/gradcheck | 8/8 | **8/8** |
+| decode M=1（fp16 triton） | 0.78ms | **0.361ms（带宽翻倍效应）** |
+| decode 摊销 M1→M256 | 82.9x | **76.6x**（带宽 bound 跨设备一致） |
 
 **环境边界发现**（E4 价值：跨设备差异）:
 1. Triton 需 CPATH 指向既有 Python.h（远程 py312-headers）
