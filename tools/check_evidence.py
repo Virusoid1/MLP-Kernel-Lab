@@ -14,7 +14,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 EXPECTED_TESTS = 213
-EXPECTED_PASSED = 176
+EXPECTED_PASSED = 181  # 2026-09-02 冻结: 93050de（fp16 算子解锁后 +5 passed）
 MIN_PASSED = 170  # 至少 170 passed（允许未来加测试但不应回落过多）
 
 

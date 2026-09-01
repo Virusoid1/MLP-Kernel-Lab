@@ -31,6 +31,6 @@ triton 4.60 < compile 6.42 < triton_fused 7.02 < cutile 11.8（tile 优化后）
 ## 复现
 
 ```bash
-make reproduce PYTHON=<venv>/bin/python   # 213 tests (176p/0f/37s)
+make reproduce PYTHON=<venv>/bin/python   # 213 tests (181p/0f/32s, 93050de 冻结)
 python bench/run.py --suite prefill --dtypes fp16 --backends eager,concat,triton,triton_fused,cuda,cutile,compile
 ```
