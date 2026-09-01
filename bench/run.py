@@ -124,7 +124,7 @@ def summarize(samples: list[float]) -> dict:
     }
 
 
-def run_case(spec, dtype_name: str, backend: str, warmup: int, iters: int) -> dict | None:
+def run_case(spec, dtype_name: str, backend: str, warmup: int, iters: int, replicates: int = 1) -> dict | None:
     M, K, F = spec["M"], spec["K"], spec["F"]
     dt = DTYPE_MAP[dtype_name]
 
@@ -169,10 +169,17 @@ def run_case(spec, dtype_name: str, backend: str, warmup: int, iters: int) -> di
             return fn(x, wg, wu, wd)
 
     torch.cuda.reset_peak_memory_stats()
-    samples = measure(time_fn, (), warmup, iters, n_repeat)
+    # replicates：独立多轮 measure，取 median-of-medians 抗噪声（suite 配置 replicates=2）
+    all_meds = []
+    for _ in range(max(1, replicates)):
+        samples = measure(time_fn, (), warmup, iters, n_repeat)
+        all_meds.append(statistics.median(samples))
+    # 汇总用跨轮 median（而非单轮），并保留单轮样本做 std 参考
+    samples = sorted(all_meds)
     peak_mb = torch.cuda.max_memory_allocated() / (1024 * 1024)
 
     st = summarize(samples)
+    st["replicates"] = replicates
     flops = block_flops(M, K, F)
     st["tflops"] = round(flops / (st["median_ms"] * 1e-3) / 1e12, 2)
     st["peak_gpu_mem_mb"] = round(peak_mb, 1)
@@ -196,6 +203,7 @@ def main() -> int:
     ap.add_argument("--iters", type=int, default=100)
     ap.add_argument("--out", default=None)
     ap.add_argument("--max-cases", type=int, default=0, help=">0 时只跑前 N 个 (shape,dtype,backend) 组合（冒烟）")
+    ap.add_argument("--randomize-backends", action="store_true", help="随机化后端测量顺序（消除 autotune/热缓存偏差）")
     args = ap.parse_args()
 
     # strict FP32：reference 与后端都在 FP32 严格模式（TF32 关闭）
@@ -212,6 +220,12 @@ def main() -> int:
     backends = ([b.strip() for b in args.backends.split(",") if b.strip()]
                 if args.backends else cfg["backends"])
     backends = [b for b in backends if b in available_backends()]
+    # 后端顺序随机化：消除固定顺序带来的 autotune/热缓存偏差（公平性）
+    _bm = cfg.get("benchmark") or {}
+    replicates = int((_bm or {}).get("replicates", 1) or 1)
+    import random as _random
+    if args.randomize_backends:
+        _random.shuffle(backends)
 
     specs = []
     if args.suite == "all":
@@ -245,7 +259,7 @@ def main() -> int:
                 if args.max_cases and tested >= args.max_cases:
                     break
                 try:
-                    row = run_case(spec, dtype, backend, args.warmup, args.iters)
+                    row = run_case(spec, dtype, backend, args.warmup, args.iters, replicates)
                 except Exception as e:
                     row = {"error": f"{type(e).__name__}: {str(e)[:140]}", "op": "swiglu_block",
                            "shape": f"{spec['M']},{spec['K']},{spec['F']}", "dtype": dtype, "backend": backend}
