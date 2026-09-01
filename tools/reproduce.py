@@ -20,7 +20,7 @@
     artifacts/<YYYYMMDD-HHMMSS-<commit>-<gpu>>/
         manifest.json         # 环境 + git + 每步状态 + 产 files
         correctness.jsonl     # 每条测试用例一行 {name, status, duration}
-        benchmark.json        # benchmark_ops.py 原始输出（{metadata, rows}）
+        benchmark.json        # SwiGLU smoke summary（bench/run.py cases/speedup/correctness）
         summary.md            # 人类可读汇总表
         environment.lock.txt  # pip freeze + nvcc/driver 摘要
 """
@@ -168,21 +168,29 @@ def step_tests() -> dict:
 
 
 def step_bench(extra_args: list[str]) -> dict:
-    """benchmark_ops.py 单次运行（默认 small smoke），返回其 JSON。"""
-    out = REPO_ROOT / "artifacts" / f"_bench_{int(time.time())}.json"
-    out.parent.mkdir(parents=True, exist_ok=True)
-    cmd = [sys.executable, "benchmark_ops.py", "--sizes", "small",
-           "--warmup", "5", "--iters", "20", "--output", str(out)] + extra_args
+    """SwiGLU 主工作负载 smoke（bench/run.py，prefill fp16 triton vs eager）。
+
+    用 --suite prefill --max-cases 4 保持 smoke 快；完整 sweep 由 bench/run.py --suite all 另行跑。
+    返回其 summary（cases / correctness_failed / best_speedup）。
+    """
+    cmd = [sys.executable, "bench/run.py", "--suite", "prefill",
+           "--dtypes", "fp16", "--backends", "eager,triton",
+           "--warmup", "5", "--iters", "20", "--max-cases", "4"] + extra_args
     r = run(cmd)
-    data = None
-    if out.exists():
-        try:
-            data = json.loads(out.read_text(encoding="utf-8"))
-        except Exception:
-            data = None
-        out.unlink(missing_ok=True)
-    return {"command": " ".join(cmd), "exit_code": r.returncode, "ok": r.returncode == 0,
-            "rows": len(data.get("rows", [])) if data else 0, "data": data}
+    # 解析 stdout 末尾的 [bench] summary 行（bench/run.py 固定格式）
+    summary = {}
+    for line in (r.stdout or "").splitlines():
+        if line.startswith("[bench] summary:"):
+            raw = line.split("summary:", 1)[1].strip()
+            try:
+                import ast
+                summary = ast.literal_eval(raw)
+            except Exception:
+                summary = {"raw": raw}
+    cases = summary.get("cases_total", 0)
+    ok = r.returncode == 0 and cases > 0 and summary.get("correctness_failed", 1) == 0
+    return {"command": " ".join(cmd), "exit_code": r.returncode, "ok": ok,
+            "rows": cases, "summary": summary}
 
 
 def write_summary(run_dir: Path, manifest: dict, tests: dict, bench: dict, skip_bench: bool) -> str:
@@ -202,13 +210,11 @@ def write_summary(run_dir: Path, manifest: dict, tests: dict, bench: dict, skip_
             if c["status"] in ("failed", "error"):
                 md.append(f"- {c['name']} [{c['status']}] ({c['time']:.2f}s)")
         md.append("")
-    md.append("## Benchmark (small smoke)")
-    if skip_bench or bench.get("data") is None:
+    md.append("## Benchmark (SwiGLU smoke, bench/run.py)")
+    if skip_bench or not bench.get("summary"):
         md.append("- (skipped / failed)")
     else:
-        md.append(f"- rows: {bench['rows']}, backend-fields: pytorch/triton/cuda(+cutile if available)")
-        first = bench["data"]["rows"][0] if bench["data"]["rows"] else {}
-        md.append(f"- sample row: {json.dumps(first, ensure_ascii=False)}")
+        md.append(f"- cases: {bench.get('rows', 0)}, summary: {json.dumps(bench['summary'], ensure_ascii=False)}")
     md.append("")
     md.append("## Files")
     for p in sorted(run_dir.iterdir()):
@@ -273,12 +279,11 @@ def main() -> int:
     if args.test_only:
         steps["bench"] = {"ok": True, "skipped": "test-only"}
     else:
-        print("[reproduce] step 3/3: benchmark_ops smoke ...")
+        print("[reproduce] step 3/3: SwiGLU smoke (bench/run.py prefill fp16) ...")
         steps["bench"] = step_bench(args.extra)
-        print(f"[reproduce] bench rows: {steps['bench']['rows']}")
-        if steps["bench"]["data"] is not None:
-            (out_root / "benchmark.json").write_text(
-                json.dumps(steps["bench"]["data"], indent=2, ensure_ascii=False), encoding="utf-8")
+        print(f"[reproduce] bench cases: {steps['bench'].get('rows', 0)}")
+        (out_root / "benchmark.json").write_text(
+            json.dumps(steps["bench"].get("summary", {}), indent=2, ensure_ascii=False), encoding="utf-8")
 
     manifest["steps"] = steps
     manifest["artifacts_dir"] = str(out_root)

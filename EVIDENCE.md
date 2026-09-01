@@ -3,13 +3,13 @@
 > Claim → Evidence path → Status → Limitation。每条主张必须可追溯（commit / manifest / 测试报告）。
 > 写简历或面试前先读这里；数字以"证据路径"为准，不引用本文之外的估算。
 >
-> 基线: v2-transformer-mlp @ `d2132d2`（2026-09-01）；环境: RTX 3070 Laptop (sm_86), torch 2.11.0+cu130, triton 3.6.0, cuda-tile 1.3.0, driver 610.88。
+> 基线: v2-transformer-mlp @ `5e67976`（2026-09-02 冻结）；环境: RTX 3070 Laptop (sm_86), torch 2.11.0+cu130, triton 3.6.0, cuda-tile 1.3.0, driver 610.88。
 
 ## 正确性
 
 | Claim | Evidence Path | Status | Level |
 |---|---|---|---|
-| 全量测试通过 | `make reproduce`（commit 8df3741, 2026-09-01）→ `artifacts/20260901-043740-8df3741-*/manifest.json` | **213 tests: 176 passed / 0 failed / 37 skipped**（含 fp16+bf16 SwiGLU-block 训练） | E2 |
+| 全量测试通过 | `make reproduce`（commit 5e67976, 2026-09-02 冻结）→ `artifacts/20260902-001328-5e67976-*/manifest.json` | **213 tests: 176 passed / 0 failed / 37 skipped**（含 fp16+bf16 SwiGLU-block 训练） | E2 |
 | 55 原始算子测试 | `tests/test_{triton,cuda,cutile}_kernels.py` | passed（并入 209 全量） | E2 |
 | SwiGLU block 六后端正确性 | `tests/test_transformer_mlp.py`（DTYPE_SUPPORT 矩阵） | fp16: 六后端闭环（corr 100%）| E2 |
 | 算子级 dtype 矩阵 | `tests/test_dtype_support_matrix.py`（执行式探测） | 20 passed / blocked-skips 记录边界 | E2 |
@@ -20,7 +20,7 @@
 
 | Claim | Evidence Path | Status | Level |
 |---|---|---|---|
-| fp16 Triton 加速 | `bench/run.py` all-suite sweep → `artifacts/swiglu_20260901-013853-all-*/swiglu_bench.json` | **266-case all-suite best 3.52x vs eager-fp32**（decode+prefill+train 全含, corr 100%）；典型 prefill/train M≥512 达 2.4-3.5x，512×4096×11008 = 4.60ms | E3 |
+| fp16 跨精度吞吐 | `bench/run.py` all-suite sweep → `artifacts/swiglu_20260901-013853-all-*/swiglu_bench.json` | **跨精度（FP16 vs FP32 eager）max 3.37x / best 3.52x**；**同精度（FP16 vs FP16 eager）median 1.014x、峰值 1.17x（主 shape 仅 +9%）**。跨精度收益来自半精度算力，非 kernel 优于同精度 cuBLAS | E3(数据，非结论) |
 | fp16 六后端性能地图 | `artifacts/swiglu_20260901-010220-prefill-*/swiglu_bench.json`（新 cutile tile） | triton 4.60 < compile 6.42 < triton_fused 7.02 < cutile 16.7 < cuda 29-118 ms（如实记录） | E3 |
 | decode 摊销 | 实验报告更新 4 + README | per-token ↓80x（M=1→128）| E3 |
 | cutile tile 优化 | `gpu_utils.py` + tile sweep | cutile matmul 1.5-1.6x（32,64,32 默认）| E3(部分) |

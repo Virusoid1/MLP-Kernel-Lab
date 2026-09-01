@@ -10,7 +10,7 @@
 ## 项目亮点
 
 - **四/五后端对比**：PyTorch (cuBLAS) / torch.compile / Triton / CUDA / cuTile，同一 workload
-- **SwiGLU MLP block 主线**：fp16 Triton 对 eager-FP32 达 **3.52x（all-suite 266-case best）**，roofline 实测 **26.7 TFLOPS = 86% fp16 理论峰值**，轮间可重复 <2%；decode 小 M 证实为权重带宽 bound（带宽利用率仅 23-36%，per-token 大 batch 摊销 ↓80x）
+- **SwiGLU MLP block 主线**：**跨精度**（FP16 Triton vs FP32 eager）吞吐比最高 **3.37x**、all-suite best 3.52x；但**同精度**（FP16 Triton vs FP16 eager）仅 **1.01-1.17x**（median 1.4%）。roofline 26.7 TFLOPS = 86% fp16-TC 峰值；decode 带宽 bound（利用率 13-20%，摊销 82.9x）
 - **可追溯结果**：`make reproduce` 一键产出 manifest（commit/dirty/GPU/driver/依赖版本）+ correctness.jsonl + benchmark.json
 - **正确性矩阵**：**213 项 pytest**（176 passed / 0 failed，SwiGLU block 多后端 × shape × dtype + 支持矩阵 + P1 opcheck + fp16/bf16 训练闭环）；strict FP32 reference 协议
 - **CUDA kernel**：naive / tiled / fused / WMMA FP16（matmul_half, L2 2e-4）/ LayerNorm 多版本
@@ -220,30 +220,32 @@ Makefile 短路:`make profile-tiled` / `make profile-nsys` / `make profile-ops` 
 
 SwiGLU MLP block，CUDA Event 计时（strict FP32 对照固化于 bench/run.py），完整 228/152-case 数据在 `artifacts/`：
 
-### fp16 Triton vs eager-FP32（加速比；prefill/train 赢区）
+### 跨精度吞吐（FP16 Triton vs FP32 eager）—— 非"kernel 胜 cuBLAS"
 
-| shape | X@W_gate+up+down | triton-fp16 | vs eager-fp32 |
+| shape | FP32 eager | FP16 triton | 跨精度比 |
 |---|---|---|---|
-| 512 × 768 × 3072 | eager 0.996ms | **0.342ms** | **2.92x** |
-| 2048 × 768 × 3072 | eager 4.223ms | **1.077ms** | **3.92x** |
-| 512 × 4096 × 11008 | eager 16.17ms | **5.097ms** | **3.17x** |
-| 2048 × 4096 × 11008 | eager 57.63ms | **19.23ms** | **3.00x** |
-| 全 sweep best（266-case all-suite 归档） | — | — | **3.52x**（decode+prefill+train 全部计入）|
+| 512 × 768 × 3072 | 0.996ms | **0.342ms** | **2.92x** |
+| 2048 × 768 × 3072 | 4.223ms | **1.077ms** | **3.92x** |
+| 512 × 4096 × 11008 | 16.17ms | **5.097ms** | **3.17x** |
+| 2048 × 4096 × 11008 | 57.63ms | **19.23ms** | **3.00x** |
+| all-suite 266-case best | — | — | **3.52x**（含 decode/prefill/train）|
 
-### fp16 六后端对照（正确性全绿 + 性能地图，42-case sweep corr 100% 归档）
+> ⚠️ 该栏是**跨精度吞吐比**（FP16 相对 FP32），主要收益来自半精度算力的固有优势，不是自定义 kernel 比同精度 cuBLAS 快。
 
-| 后端（M=512×4096×11008, fp16, median） | 延迟 | 正确性 norm_l2 |
-|---|---|---|
-| eager（cuBLAS） | 5.01ms | reference |
-| **triton** | **4.60ms** | 4.8e-4 |
-| compile | 6.42ms | 4.9e-4 |
-| triton_fused | 7.02ms | 2.9e-4 |
-| cutile | 11.8ms（tile 优化后）| 5.7e-4 |
-| cuda（matmul_half WMMA） | 29-118ms | 4.8e-4 |
+### fp16 同精度（Triton vs eager cuBLAS）—— 真实自定义 kernel 增益
 
-> **结论**：fp16 正确性六后端全闭环（norm_l2 2.4e-4~6e-4）；性能上 triton 是 3070 主路径（vs eager-fp32 达 3.52x，all-suite），
-> cuda/cutile 慢（wmma32/ct.mma tile 不敌 cuBLAS，诚实记录为后续优化）。完整数据在
-> `artifacts/swiglu_20260901-010220-prefill-*`（42-case sweep，新 cutile tile 归档）。
+| 后端（M=512×4096×11008, fp16, median） | 延迟 | 同精度比 vs eager | 正确性 norm_l2 |
+|---|---|---|---|
+| eager（cuBLAS） | 5.01ms | 1.00x | reference |
+| **triton** | **4.60ms** | **1.09x** | 4.8e-4 |
+| compile | 6.42ms | 0.78x | 4.9e-4 |
+| triton_fused | 7.02ms | 0.71x | 2.9e-4 |
+| cutile | 11.8ms（tile 优化后）| 0.42x | 5.7e-4 |
+| cuda（matmul_half WMMA） | 29-118ms | 0.04-0.17x | 4.8e-4 |
+
+> **结论（诚实）**：同精度下 Triton 相对 cuBLAS **仅微胜（+9%，全 case median 1.4%、峰值 1.17x）**；
+> cuda/cutile 同精度显著落后。所谓"3.x 倍"是跨精度（FP16 vs FP32）吞吐比，主因是半精度算力，而非 kernel 实现更优。
+> 完整数据 `artifacts/swiglu_20260901-013853-all-*`（266-case）。
 
 ### decode 摊销（K=4096/F=11008, fp16, per-token）
 

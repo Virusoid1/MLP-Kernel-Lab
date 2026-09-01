@@ -16,7 +16,7 @@
 
 | 项 | 状态 | 需要的条件 |
 |---|---|---|
-| E4 跨设备复现 | 仅 3070 验证 | 3080 Ti / 3090 Ti（sm86）、5070 Ti（sm120）实机 |
+| E4 跨设备复现 | 3070 + 3080 Ti 已测（文档声称，原始 JSON 未入 git）；3090 Ti 部分验证中；5070 Ti 未测 | 原始 evidence 需补回 git 归档后才算闭环 |
 | Blackwell（sm120）工具链 | preflight/compat 代码就绪未跑 | 5070 Ti + CUDA ≥13 + 匹配 torch |
 | cuTile 在 5070 Ti 的性能 | 3070 慢（11.8ms，tile (32,64,32) 优化后；仍 2-3x 慢于 triton 4.6ms），Blackwell 才是 cuTile 主战场 | 5070 Ti 实机 |
 | ncu/nsys 硬件计数器 | WSL 无 sudo 权限（ERR_NVGPUCTRPERM） | sudo 或非 WSL 环境 |

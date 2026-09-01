@@ -45,7 +45,7 @@ test-python:
 	$(PYTHON) -m pytest tests/ -v
 
 # 当前 GPU compute capability（与 setup.py 同一策略；可被 TORCH_CUDA_ARCH_LIST 覆盖）
-CUDA_ARCH ?= $(shell python -c "import torch; print(f'{torch.cuda.get_device_capability(0)[0]}{torch.cuda.get_device_capability(0)[1]}')" 2>/dev/null || echo 86)
+CUDA_ARCH ?= $(shell $(PYTHON) -c "import torch; print(f'{torch.cuda.get_device_capability(0)[0]}{torch.cuda.get_device_capability(0)[1]}')" 2>/dev/null || echo 86)
 GENCODE = -gencode=arch=compute_$(CUDA_ARCH),code=sm_$(CUDA_ARCH)
 
 # C++ CUDA 测试
