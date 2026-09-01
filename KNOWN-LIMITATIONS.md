@@ -16,9 +16,9 @@
 
 | 项 | 状态 | 需要的条件 |
 |---|---|---|
-| E4 跨设备复现 | 3070 + 3080 Ti + 3090 Ti 均已测且 raw JSON 入 git（artifacts_3080ti/ + artifacts_3090ti/）；5070 Ti 未测 | 5070 Ti（Blackwell 跨代）仍需独立编译验证后才算完全闭环 |
-| Blackwell（sm120）工具链 | preflight/compat 代码就绪未跑 | 5070 Ti + CUDA ≥13 + 匹配 torch |
-| cuTile 在 5070 Ti 的性能 | 3070 慢（11.8ms，tile (32,64,32) 优化后；仍 2-3x 慢于 triton 4.6ms），Blackwell 才是 cuTile 主战场 | 5070 Ti 实机 |
+| E4 跨设备复现 | 3070 + 3080 Ti + 3090 Ti + 5070 Ti 均已测且 raw JSON 入 git（artifacts_3080ti/ + artifacts_3090ti/ + artifacts_5070ti/） | **闭环达成**；唯一剩余项 = 5070 Ti 上的 cuda 后端未编译（见下） |
+| Blackwell（sm120）工具链 | 5070 Ti 已实机（nvcc 13.2 / torch 2.13+cu130 / triton 3.7.1）；preflight lane=blackwell + cutile_probe=True | ~~5070 Ti + CUDA ≥13 + 匹配 torch~~ ✅ 已跑 |
+| cuTile 在 5070 Ti 的性能 | 3070 慢（11.8ms）；5070 Ti 上 cutile 可 import（driver 610 满足 r580+）但完整 sweep 未跑 | 5070 Ti 实机（cutile_probe=True 已确认，性能 sweep 未做） |
 | ncu/nsys 硬件计数器 | WSL 无 sudo 权限（ERR_NVGPUCTRPERM） | sudo 或非 WSL 环境 |
 | ~~训练闭环在 fp16 全工况~~ | **已消除（2026-09）：新增 tests/test_training_loop.py 的 fp16 用例** —— eager(cuBLAS fp16) 与 Triton 自定义后端 fp16 均收敛（loss rel<0.005），2/2 测试通过 | ✅ 已验证 |
 

@@ -32,8 +32,11 @@
 |---|---|---|---|
 | make reproduce 一键复现 | `tools/reproduce.py` + `Makefile` | build→test→bench→manifest 全自动（含 CUDA 工具链自动探测）| E3 |
 | Manifest 完整（commit/dirty/GPU/deps） | `artifacts/<run-id>/manifest.json` | capture_metadata 补足 triton/cutile/nvcc/git_dirty | E3 |
-| 多机构建（Ampere/Blackwell） | `tools/preflight.py` + `docs/compatibility-matrix.md` | 3070 实测 status=0（Ampere lane）；3080Ti/3090Ti/5070Ti 代码就绪待实机 | E4(待) |
+| 多机构建（Ampere/Blackwell） | `tools/preflight.py` + `docs/compatibility-matrix.md` | 3070 status=0（Ampere）；3080Ti/3090Ti/5070Ti 均已实机（lane + cutile_probe 正确分流） | E4 |
+| E4 跨代复现（5070 Ti Blackwell sm120, 2026-09-02） | `artifacts_5070ti/`（raw JSON：fp16 prefill 18 + fp32 baseline 6） + §5.8 | **fp16 Triton 2.62x-3.00x vs eager-fp32；decode M1 摊销 125.2x；P1 8/8；correctness 60 passed**；同精度 vs cuBLAS 0.97-1.07x（无明显优势，如实记录） | E4 |
 | E4 第二设备复现（3080 Ti, 2026-09-01） | `docs/e4-runbook.md` §5.5 + claim-matrix E4 行 | **fp16 Triton 2.16x-3.69x vs eager-fp32，正确性/P1 同 arch 复现成功**（cutile/cuda 边界为 driver/nvcc 限制，如实记录） | E4 |
+| E4 第二设备复现（3090 Ti, 2026-09-01） | `docs/e4-runbook.md` §5.6 + claim-matrix E4 行 | **fp16 Triton 2.46x-3.40x vs eager-fp32；2048-shape 2.97x；P1 8/8；correctness 43p** | E4 |
+| E4 跨代复现（5070 Ti Blackwell, 2026-09-02） | `docs/e4-runbook.md` §5.8 + claim-matrix E4 行 + `artifacts_5070ti/` | **fp16 Triton 2.62x-3.00x vs eager-fp32；decode 摊销 125.2x；P1 8/8；correctness 60p** | E4 |
 | 构建隔离 | `setup.py` build_base | build/py312-torch2.11.0-sm86/（架构不互污染）| E2 |
 
 ## 失败案例 / 负结果（面试重点）

@@ -144,6 +144,22 @@ max_temp / max_power / throttled : <...>
 - **结论**: 双卡并行无性能衰减（每卡独立跑满）；3090 Ti 24GB 可支撑 M=8192 压力 shape（28.2ms）
 - 大 shape 下 3090 Ti vs 3080 Ti = 1.51x（SM 84 vs 80 + 更大带宽）
 
+## 5.8 5070 Ti（Blackwell sm120）实测记录（2026-09-02）
+
+**跨代验证**：preflight 首次识别 lane=blackwell（cc 12.0 / 70 SM / nvcc 13.2）。
+
+| 指标（fp16 triton） | 3070 | 3080 Ti | 3090 Ti | **5070 Ti** |
+|---|---|---|---|---|
+| 跨精度 fp16/fp32 | 2.4-3.5x | 2.16-3.69x | 2.46-3.40x | **2.62-3.00x** |
+| 同精度 fp16/fp16（大 shape） | 1.07x | ~1.09x | ~1.03x | **0.97-1.07x** |
+| 512×4096×11008 triton | 4.60ms | 2.76ms | 1.98ms | **1.52ms** |
+| decode M=1 | 0.78ms | 0.361ms | 0.359ms | **0.384ms** |
+| decode 摊销 | 82.9x | 76.6x | 86.4x | **125.2x** |
+| P1 / 正确性 | 8/8, 213t | 8/8, 42p | 8/8, 43p | **8/8, 60p** |
+
+- **Blackwell 结论**：跨代正确性（六后端 + P1）完全成立；性能上 triton fp16 大 shape 3x vs fp32（跨精度），但**同精度 vs cuBLAS 无显著优势**（Blackwell cuBLAS 更强）；decode 摊销到 125x。
+- cutile 在 Blackwell driver 610 下**可用**（cutile_probe=True），六后端首次在单设备上全可用（除 cuda 需编译）。
+
 ## 6. 完成后回报
 
 - 三产物：manifest 链路(artifacts)、E4 对比表(追加 compat-matrix)、实验报告(docs/experiments/e4-<gpu>-<date>.md)
