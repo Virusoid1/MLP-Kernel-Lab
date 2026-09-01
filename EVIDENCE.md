@@ -55,6 +55,6 @@
 
 ## 30s / 3min / 15min 讲法（速记）
 
-- **30s**: 为 Transformer SwiGLU MLP 做了多后端（eager/compile/triton/cuda/cutile）kernel 实验系统，fp16 Triton 在 prefill/train 达 4x（vs cuBLAS-FP32），并完成六后端 fp16 正确性闭环 + 可复现 manifest。
+- **30s**: 为 Transformer SwiGLU MLP 做了多后端（eager/compile/triton/cuda/cutile）kernel 实验系统：**跨精度**（FP16 Triton vs FP32 eager）吞吐 max 3.37x / best 3.52x（收益来自半精度算力）；**同精度**（FP16 vs FP16）无显著优势（median 1.014x，主 shape +9%）；完成 fp16+bf16 正确性闭环（cuda 算子 16/16、块级三 dtype 自定义）+ 235t/216p 可复现 manifest + Blackwell 全量对齐。
 - **3min**: 加正确性矩阵（opcheck/gradcheck/训练对齐）、性能协议（CUDA Event/manifest）、失败案例（decode 带宽 bound、cuda WMMA 精度之谜）；数字全部可追溯。
 - **15min**: 完整故事——从问题→方案→测量→优化→失败→边界，见 `docs/claim-matrix.md` + `docs/experiments/swiglu-sweep-20260831-3070.md`。

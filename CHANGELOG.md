@@ -1,5 +1,20 @@
 # CHANGELOG
 
+## 2026-09-02 v2 E4 收官 — 跨代复现 + 全算子 dtype 完备（commit 1a9e1c9）
+
+**内容（3070 + 5070 Ti 双架构实测）：**
+- **E4 跨设备复现证据冻结**：3080 Ti / 3090 Ti / 5070 Ti raw JSON 入 git（artifacts_*，fp16 prefill 18 rows + fp32 baseline 6 rows）；5070 Ti `mlp_cuda` 为 sm120 单独编译（TORCH_CUDA_ARCH_LIST=12.0, nvcc 13.2）
+- **cuda 算子级 fp16+bf16 解锁**：swiglu_fused/softmax/relu/gelu/silu/bias_add/matmul/fused_first 的 half/bf16 变体（低精度 in→fp32 math→同精度 out）；dtype matrix cuda **16/16 PASS**
+- **块级 bf16 WMMA matmul**：`kernels/mlp/matmul_bf16.cu`（bf16 in→fp32 acc→bf16 out）→ cuda 块三 dtype（fp32/fp16/bf16）全自定义
+- **P1 torch.library 推广**：`mlp_kernel::matmul` + `mlp_kernel::layernorm`（schema/CPU+CUDA/Meta/autograd + opcheck/gradcheck/compile）＝ 21 registration tests
+- **conv2d/pool/im2col fp16+bf16**：模板化 kernels + WMMA 组合 → **CUDA 算子表 100% dtype 完备**（cuda_kernels 25p）
+- **七后端性能地图**：fp16+bf16 × 7 backends × 6 shapes = 84 rows（3070 + Blackwell 各归档），正确性 100%
+- **cutile Blackwell 负结果**：M512×4096×11008 cutile fp16 62.7ms（3070 11.4ms，5x 慢）——ct.mma 在 sm120 未获 tcgen05 加速，推翻「Blackwell 是 cuTile 主战场」旧假设
+- **基线**：`make reproduce` **235 tests / 216 passed / 0 failed / 19 skipped**（3070 冻结 2110876；guard ALL OK）
+- **E2 行清理**：C++ test_kernels 6/6（make test-cuda）、check_evidence EXPECTED 同步全部基线
+- **cuTile layernorm 跨代修复（1707aed）**：Blackwell tile=512 时 N<TILE 零填充垃圾 + 方差污染 → 零填充到 TILE 整数倍 + var=E[x²]-mean²
+- **Blackwell 全量对齐**：5070 Ti `tools/reproduce.py` 全量 **216/235（0 failed）** 与 3070 冻结基线完全一致（E4 最高级闭环）
+
 ## 2026-08-31 v2 — SwiGLU MLP block 主线 + fp16 TensorCore 胜势 + 可追溯复现
 
 **里程碑（v2 阶段）：**
