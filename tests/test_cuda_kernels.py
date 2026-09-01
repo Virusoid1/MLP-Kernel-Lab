@@ -177,3 +177,38 @@ class TestFused:
         out = mlp_cuda.swiglu_fused(x, x)
         ref = torch.nn.functional.silu(x) * x
         assert torch.allclose(out, ref, rtol=1e-4, atol=1e-4)
+
+
+# ============================================================
+# conv2d / pool fp16 / bf16（v2 4.x：全算子 dtype 完备）
+# ============================================================
+
+class TestConvPoolDtypes:
+    DTYPES = [torch.float32, torch.float16, torch.bfloat16]
+
+    @pytest.mark.parametrize("dtype", DTYPES)
+    def test_maxpool2d(self, dtype):
+        x = torch.randn(2, 4, 8, 8, device="cuda", dtype=dtype)
+        out = mlp_cuda.maxpool2d(x, 2, 2, 0)
+        ref = torch.nn.functional.max_pool2d(x.float(), 2, 2, 0)
+        l2 = ((out.float() - ref).pow(2).sum() / ref.pow(2).sum()).sqrt().item()
+        assert l2 < 5e-2, f"{dtype} maxpool l2={l2:.3e}"
+
+    @pytest.mark.parametrize("dtype", DTYPES)
+    def test_avgpool2d(self, dtype):
+        x = torch.randn(2, 4, 8, 8, device="cuda", dtype=dtype)
+        out = mlp_cuda.avgpool2d(x, 2, 2, 0)
+        ref = torch.nn.functional.avg_pool2d(x.float(), 2, 2, 0)
+        l2 = ((out.float() - ref).pow(2).sum() / ref.pow(2).sum()).sqrt().item()
+        assert l2 < 5e-2, f"{dtype} avgpool l2={l2:.3e}"
+
+    @pytest.mark.parametrize("dtype", DTYPES)
+    def test_conv2d(self, dtype):
+        x = torch.randn(1, 3, 8, 8, device="cuda", dtype=dtype)
+        w = torch.randn(6, 3, 3, 3, device="cuda", dtype=dtype)
+        b = torch.randn(6, device="cuda", dtype=dtype)
+        out = mlp_cuda.conv2d(x, w, b, 1, 0)
+        ref = torch.nn.functional.conv2d(x.float(), w.float(), b.float(), stride=1, padding=0)
+        l2 = ((out.float() - ref).pow(2).sum() / ref.pow(2).sum()).sqrt().item()
+        assert l2 < 5e-2, f"{dtype} conv2d l2={l2:.3e}"
+

@@ -134,6 +134,18 @@ void launch_maxpool2d(
     int H_out, int W_out,
     int kernel_size, int stride, int padding,
     cudaStream_t stream);
+void launch_maxpool2d_half(
+    const half* input, half* output,
+    int N, int C, int H, int W,
+    int H_out, int W_out,
+    int kernel_size, int stride, int padding,
+    cudaStream_t stream);
+void launch_maxpool2d_bf16(
+    const __nv_bfloat16* input, __nv_bfloat16* output,
+    int N, int C, int H, int W,
+    int H_out, int W_out,
+    int kernel_size, int stride, int padding,
+    cudaStream_t stream);
 
 void launch_avgpool2d(
     const float* input, float* output,
@@ -141,9 +153,35 @@ void launch_avgpool2d(
     int H_out, int W_out,
     int kernel_size, int stride, int padding,
     cudaStream_t stream);
+void launch_avgpool2d_half(
+    const half* input, half* output,
+    int N, int C, int H, int W,
+    int H_out, int W_out,
+    int kernel_size, int stride, int padding,
+    cudaStream_t stream);
+void launch_avgpool2d_bf16(
+    const __nv_bfloat16* input, __nv_bfloat16* output,
+    int N, int C, int H, int W,
+    int H_out, int W_out,
+    int kernel_size, int stride, int padding,
+    cudaStream_t stream);
 
 void launch_im2col(
     const float* input, float* col,
+    int N, int C, int H, int W,
+    int H_out, int W_out,
+    int KH, int KW,
+    int stride, int padding,
+    cudaStream_t stream);
+void launch_im2col_half(
+    const half* input, half* col,
+    int N, int C, int H, int W,
+    int H_out, int W_out,
+    int KH, int KW,
+    int stride, int padding,
+    cudaStream_t stream);
+void launch_im2col_bf16(
+    const __nv_bfloat16* input, __nv_bfloat16* col,
     int N, int C, int H, int W,
     int H_out, int W_out,
     int KH, int KW,
@@ -646,19 +684,37 @@ torch::Tensor softmax(torch::Tensor x) {
 torch::Tensor maxpool2d(
     torch::Tensor x, int kernel_size, int stride, int padding)
 {
-    CHECK_CUDA(x); CHECK_CONTIGUOUS(x); CHECK_FLOAT32(x);
+    CHECK_CUDA(x); CHECK_CONTIGUOUS(x);
     TORCH_CHECK(x.dim() == 4, "x must be 4D (N, C, H, W)");
 
     int N = x.size(0), C = x.size(1), H = x.size(2), W = x.size(3);
     int H_out = (H + 2 * padding - kernel_size) / stride + 1;
     int W_out = (W + 2 * padding - kernel_size) / stride + 1;
 
-    auto output = torch::full({N, C, H_out, W_out}, -1e30f, x.options());
-    launch_maxpool2d(
-        x.data_ptr<float>(), output.data_ptr<float>(),
-        N, C, H, W, H_out, W_out,
-        kernel_size, stride, padding,
-        _get_cuda_stream(x));
+    // -65504 = -(fp16 最大有限值)，fp16/bf16/fp32 均可表示（padding 位置语义安全）
+    auto output = torch::full({N, C, H_out, W_out}, -6.5e4, x.options());
+    if (x.scalar_type() == torch::kHalf) {
+        launch_maxpool2d_half(
+            reinterpret_cast<const half*>(x.data_ptr<at::Half>()),
+            reinterpret_cast<half*>(output.data_ptr<at::Half>()),
+            N, C, H, W, H_out, W_out,
+            kernel_size, stride, padding,
+            _get_cuda_stream(x));
+    } else if (x.scalar_type() == torch::kBFloat16) {
+        launch_maxpool2d_bf16(
+            reinterpret_cast<const __nv_bfloat16*>(x.data_ptr<at::BFloat16>()),
+            reinterpret_cast<__nv_bfloat16*>(output.data_ptr<at::BFloat16>()),
+            N, C, H, W, H_out, W_out,
+            kernel_size, stride, padding,
+            _get_cuda_stream(x));
+    } else {
+        CHECK_FLOAT32(x);
+        launch_maxpool2d(
+            x.data_ptr<float>(), output.data_ptr<float>(),
+            N, C, H, W, H_out, W_out,
+            kernel_size, stride, padding,
+            _get_cuda_stream(x));
+    }
     return output;
 }
 
@@ -669,7 +725,7 @@ torch::Tensor maxpool2d(
 torch::Tensor avgpool2d(
     torch::Tensor x, int kernel_size, int stride, int padding)
 {
-    CHECK_CUDA(x); CHECK_CONTIGUOUS(x); CHECK_FLOAT32(x);
+    CHECK_CUDA(x); CHECK_CONTIGUOUS(x);
     TORCH_CHECK(x.dim() == 4, "x must be 4D (N, C, H, W)");
 
     int N = x.size(0), C = x.size(1), H = x.size(2), W = x.size(3);
@@ -677,11 +733,28 @@ torch::Tensor avgpool2d(
     int W_out = (W + 2 * padding - kernel_size) / stride + 1;
 
     auto output = torch::zeros({N, C, H_out, W_out}, x.options());
-    launch_avgpool2d(
-        x.data_ptr<float>(), output.data_ptr<float>(),
-        N, C, H, W, H_out, W_out,
-        kernel_size, stride, padding,
-        _get_cuda_stream(x));
+    if (x.scalar_type() == torch::kHalf) {
+        launch_avgpool2d_half(
+            reinterpret_cast<const half*>(x.data_ptr<at::Half>()),
+            reinterpret_cast<half*>(output.data_ptr<at::Half>()),
+            N, C, H, W, H_out, W_out,
+            kernel_size, stride, padding,
+            _get_cuda_stream(x));
+    } else if (x.scalar_type() == torch::kBFloat16) {
+        launch_avgpool2d_bf16(
+            reinterpret_cast<const __nv_bfloat16*>(x.data_ptr<at::BFloat16>()),
+            reinterpret_cast<__nv_bfloat16*>(output.data_ptr<at::BFloat16>()),
+            N, C, H, W, H_out, W_out,
+            kernel_size, stride, padding,
+            _get_cuda_stream(x));
+    } else {
+        CHECK_FLOAT32(x);
+        launch_avgpool2d(
+            x.data_ptr<float>(), output.data_ptr<float>(),
+            N, C, H, W, H_out, W_out,
+            kernel_size, stride, padding,
+            _get_cuda_stream(x));
+    }
     return output;
 }
 
@@ -692,7 +765,7 @@ torch::Tensor avgpool2d(
 torch::Tensor im2col(
     torch::Tensor x, int KH, int KW, int stride, int padding)
 {
-    CHECK_CUDA(x); CHECK_CONTIGUOUS(x); CHECK_FLOAT32(x);
+    CHECK_CUDA(x); CHECK_CONTIGUOUS(x);
     TORCH_CHECK(x.dim() == 4, "x must be 4D (N, C, H, W)");
 
     int N = x.size(0), C = x.size(1), H = x.size(2), W = x.size(3);
@@ -700,10 +773,25 @@ torch::Tensor im2col(
     int W_out = (W + 2 * padding - KW) / stride + 1;
 
     auto col = torch::zeros({N * H_out * W_out, C * KH * KW}, x.options());
-    launch_im2col(
-        x.data_ptr<float>(), col.data_ptr<float>(),
-        N, C, H, W, H_out, W_out, KH, KW, stride, padding,
-        _get_cuda_stream(x));
+    if (x.scalar_type() == torch::kHalf) {
+        launch_im2col_half(
+            reinterpret_cast<const half*>(x.data_ptr<at::Half>()),
+            reinterpret_cast<half*>(col.data_ptr<at::Half>()),
+            N, C, H, W, H_out, W_out, KH, KW, stride, padding,
+            _get_cuda_stream(x));
+    } else if (x.scalar_type() == torch::kBFloat16) {
+        launch_im2col_bf16(
+            reinterpret_cast<const __nv_bfloat16*>(x.data_ptr<at::BFloat16>()),
+            reinterpret_cast<__nv_bfloat16*>(col.data_ptr<at::BFloat16>()),
+            N, C, H, W, H_out, W_out, KH, KW, stride, padding,
+            _get_cuda_stream(x));
+    } else {
+        CHECK_FLOAT32(x);
+        launch_im2col(
+            x.data_ptr<float>(), col.data_ptr<float>(),
+            N, C, H, W, H_out, W_out, KH, KW, stride, padding,
+            _get_cuda_stream(x));
+    }
     return col;
 }
 
@@ -717,7 +805,8 @@ torch::Tensor conv2d(
 {
     CHECK_CUDA(input); CHECK_CUDA(weight);
     CHECK_CONTIGUOUS(input); CHECK_CONTIGUOUS(weight);
-    CHECK_FLOAT32(input); CHECK_FLOAT32(weight);
+    TORCH_CHECK(input.scalar_type() == weight.scalar_type(),
+                "input and weight must have same dtype");
     TORCH_CHECK(input.dim() == 4, "input must be 4D (N, C_in, H, W)");
     TORCH_CHECK(weight.dim() == 4, "weight must be 4D (C_out, C_in, KH, KW)");
 
@@ -728,24 +817,45 @@ torch::Tensor conv2d(
 
     // im2col
     auto col = torch::zeros({N * H_out * W_out, C_in * KH * KW}, input.options());
-    launch_im2col(
-        input.data_ptr<float>(), col.data_ptr<float>(),
-        N, C_in, H, W, H_out, W_out, KH, KW, stride, padding,
-        _get_cuda_stream(input));
+    if (input.scalar_type() == torch::kHalf) {
+        launch_im2col_half(
+            reinterpret_cast<const half*>(input.data_ptr<at::Half>()),
+            reinterpret_cast<half*>(col.data_ptr<at::Half>()),
+            N, C_in, H, W, H_out, W_out, KH, KW, stride, padding,
+            _get_cuda_stream(input));
+    } else if (input.scalar_type() == torch::kBFloat16) {
+        launch_im2col_bf16(
+            reinterpret_cast<const __nv_bfloat16*>(input.data_ptr<at::BFloat16>()),
+            reinterpret_cast<__nv_bfloat16*>(col.data_ptr<at::BFloat16>()),
+            N, C_in, H, W, H_out, W_out, KH, KW, stride, padding,
+            _get_cuda_stream(input));
+    } else {
+        CHECK_FLOAT32(input); CHECK_FLOAT32(weight);
+        launch_im2col(
+            input.data_ptr<float>(), col.data_ptr<float>(),
+            N, C_in, H, W, H_out, W_out, KH, KW, stride, padding,
+            _get_cuda_stream(input));
+    }
 
     // weight reshape + transpose: (C_out, C_in*KH*KW) -> (C_in*KH*KW, C_out)
     auto w_flat = weight.reshape({C_out, -1}).transpose(0, 1).contiguous();
 
-    // matmul via tiled_auto
+    // matmul（fp16/bf16 走 WMMA TensorCore；fp32 走 tiled_auto）
     auto output = torch::empty({N * H_out * W_out, C_out}, input.options());
-    launch_matmul_tiled_auto(
-        col.data_ptr<float>(), w_flat.data_ptr<float>(), output.data_ptr<float>(),
-        N * H_out * W_out, C_in * KH * KW, C_out,
-        _get_cuda_stream(input));
+    if (input.scalar_type() == torch::kHalf) {
+        output = ::matmul_half(col, w_flat);
+    } else if (input.scalar_type() == torch::kBFloat16) {
+        output = ::matmul_bf16(col, w_flat);
+    } else {
+        launch_matmul_tiled_auto(
+            col.data_ptr<float>(), w_flat.data_ptr<float>(), output.data_ptr<float>(),
+            N * H_out * W_out, C_in * KH * KW, C_out,
+            _get_cuda_stream(input));
+    }
 
-    // add bias
+    // add bias（字段对齐：output (M, C_out) + bias (C_out,)）
     if (bias.numel() > 0) {
-        output = output + bias.unsqueeze(0);
+        output = ::bias_add(output, bias);
     }
 
     // reshape to (N, C_out, H_out, W_out)
