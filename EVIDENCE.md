@@ -3,7 +3,7 @@
 > Claim → Evidence path → Status → Limitation。每条主张必须可追溯（commit / manifest / 测试报告）。
 > 写简历或面试前先读这里；数字以"证据路径"为准，不引用本文之外的估算。
 >
-> 基线: v2-transformer-mlp @ `5e67976`（2026-09-02 冻结）；环境: RTX 3070 Laptop (sm_86), torch 2.11.0+cu130, triton 3.6.0, cuda-tile 1.3.0, driver 610.88。
+> 基线: v2-transformer-mlp @ `2110876`（2026-09-02 冻结，HEAD 254a19d 已同步）；环境: RTX 3070 Laptop (sm_86), torch 2.11.0+cu130, triton 3.6.0, cuda-tile 1.3.0, driver 610.88。
 
 ## 正确性
 
