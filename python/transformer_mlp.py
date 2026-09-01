@@ -124,10 +124,23 @@ def swiglu_block_cutile(x: torch.Tensor, w_gate: torch.Tensor, w_up: torch.Tenso
     return cutile_matmul(hidden, w_down).to(in_dtype)
 
 
+_compiled_eager_fn = None
+_compiled_eager_signature = None
+
+
 def swiglu_block_compile(x: torch.Tensor, w_gate: torch.Tensor, w_up: torch.Tensor,
                          w_down: torch.Tensor) -> torch.Tensor:
-    """torch.compile(Inductor) 包裹 eager。"""
-    return torch.compile(swiglu_block_eager)(x, w_gate, w_up, w_down)
+    """torch.compile(Inductor) 包裹 eager。
+
+    编译函数按 (dtype, device) 缓存：torch.compile 首次编译昂贵，
+    基准的正确性预检 + 计时热循环会多次调用，缓存在此避免重复编译。
+    """
+    global _compiled_eager_fn, _compiled_eager_signature
+    sig = (x.dtype, x.device)
+    if _compiled_eager_fn is None or _compiled_eager_signature != sig:
+        _compiled_eager_fn = torch.compile(swiglu_block_eager)
+        _compiled_eager_signature = sig
+    return _compiled_eager_fn(x, w_gate, w_up, w_down)
 
 
 BACKENDS = {
