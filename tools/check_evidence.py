@@ -13,8 +13,8 @@ import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
-EXPECTED_TESTS = 226
-EXPECTED_PASSED = 207  # 2026-09-02 冻结: 3cebeee（+4 = bias_add/fused_first fp16+bf16）
+EXPECTED_TESTS = 235
+EXPECTED_PASSED = 216  # 2026-09-02 冻结: 2110876（+9 = conv2d/pool fp16+bf16 测试）
 MIN_PASSED = 170  # 至少 170 passed（允许未来加测试但不应回落过多）
 
 
