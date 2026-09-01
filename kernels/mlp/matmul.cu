@@ -7,6 +7,8 @@
  */
 
 #include <cuda_runtime.h>
+#include <cuda_fp16.h>
+#include <cuda_bf16.h>
 #include "wmma_decl.cuh"
 
 // ============================================================
@@ -213,6 +215,43 @@ void launch_bias_add(
     dim3 block(32, 16);
     dim3 grid((N + 31) / 32, (M + 15) / 16);
     bias_add_kernel<<<grid, block, 0, stream>>>(input, bias, output, M, N);
+}
+
+// bias_add (fp16 / bf16: 低精度 in -> fp32 add -> 同精度 out)
+__global__ void bias_add_half_kernel(
+    const half* __restrict__ input, const half* __restrict__ bias,
+    half* __restrict__ output, int M, int N)
+{
+    int row = blockIdx.y * blockDim.y + threadIdx.y;
+    int col = blockIdx.x * blockDim.x + threadIdx.x;
+    if (row < M && col < N)
+        output[row * N + col] = __float2half(__half2float(input[row * N + col]) + __half2float(bias[col]));
+}
+void launch_bias_add_half(
+    const half* input, const half* bias, half* output,
+    int M, int N, cudaStream_t stream)
+{
+    dim3 block(32, 16);
+    dim3 grid((N + 31) / 32, (M + 15) / 16);
+    bias_add_half_kernel<<<grid, block, 0, stream>>>(input, bias, output, M, N);
+}
+
+__global__ void bias_add_bf16_kernel(
+    const __nv_bfloat16* __restrict__ input, const __nv_bfloat16* __restrict__ bias,
+    __nv_bfloat16* __restrict__ output, int M, int N)
+{
+    int row = blockIdx.y * blockDim.y + threadIdx.y;
+    int col = blockIdx.x * blockDim.x + threadIdx.x;
+    if (row < M && col < N)
+        output[row * N + col] = __float2bfloat16(__bfloat162float(input[row * N + col]) + __bfloat162float(bias[col]));
+}
+void launch_bias_add_bf16(
+    const __nv_bfloat16* input, const __nv_bfloat16* bias, __nv_bfloat16* output,
+    int M, int N, cudaStream_t stream)
+{
+    dim3 block(32, 16);
+    dim3 grid((N + 31) / 32, (M + 15) / 16);
+    bias_add_bf16_kernel<<<grid, block, 0, stream>>>(input, bias, output, M, N);
 }
 
 // ============================================================

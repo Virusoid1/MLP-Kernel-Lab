@@ -72,6 +72,12 @@ void launch_silu_backward(
 void launch_bias_add(
     const float* input, const float* bias, float* output,
     int M, int N, cudaStream_t stream);
+void launch_bias_add_half(
+    const half* input, const half* bias, half* output,
+    int M, int N, cudaStream_t stream);
+void launch_bias_add_bf16(
+    const __nv_bfloat16* input, const __nv_bfloat16* bias, __nv_bfloat16* output,
+    int M, int N, cudaStream_t stream);
 
 void launch_matmul_transB(
     const float* A, const float* B, float* C,
@@ -256,7 +262,8 @@ torch::Tensor matmul_bf16(torch::Tensor A, torch::Tensor B) {
 torch::Tensor bias_add(torch::Tensor x, torch::Tensor bias) {
     CHECK_CUDA(x); CHECK_CUDA(bias);
     CHECK_CONTIGUOUS(x); CHECK_CONTIGUOUS(bias);
-    CHECK_FLOAT32(x); CHECK_FLOAT32(bias);
+    TORCH_CHECK(x.scalar_type() == bias.scalar_type(),
+                "x and bias must have same dtype; got ", x.scalar_type(), " vs ", bias.scalar_type());
 
     TORCH_CHECK(x.dim() == 2, "x must be 2D (M, N)");
     TORCH_CHECK(bias.dim() == 1 && bias.size(0) == x.size(1),
@@ -264,9 +271,24 @@ torch::Tensor bias_add(torch::Tensor x, torch::Tensor bias) {
 
     int M = x.size(0), N = x.size(1);
     auto output = torch::empty({M, N}, x.options());
-    launch_bias_add(
-        x.data_ptr<float>(), bias.data_ptr<float>(), output.data_ptr<float>(),
-        M, N, _get_cuda_stream(x));
+    if (x.scalar_type() == torch::kHalf) {
+        launch_bias_add_half(
+            reinterpret_cast<const half*>(x.data_ptr<at::Half>()),
+            reinterpret_cast<const half*>(bias.data_ptr<at::Half>()),
+            reinterpret_cast<half*>(output.data_ptr<at::Half>()),
+            M, N, _get_cuda_stream(x));
+    } else if (x.scalar_type() == torch::kBFloat16) {
+        launch_bias_add_bf16(
+            reinterpret_cast<const __nv_bfloat16*>(x.data_ptr<at::BFloat16>()),
+            reinterpret_cast<const __nv_bfloat16*>(bias.data_ptr<at::BFloat16>()),
+            reinterpret_cast<__nv_bfloat16*>(output.data_ptr<at::BFloat16>()),
+            M, N, _get_cuda_stream(x));
+    } else {
+        CHECK_FLOAT32(x); CHECK_FLOAT32(bias);
+        launch_bias_add(
+            x.data_ptr<float>(), bias.data_ptr<float>(), output.data_ptr<float>(),
+            M, N, _get_cuda_stream(x));
+    }
     return output;
 }
 
@@ -392,12 +414,22 @@ torch::Tensor mlp_fused_first_layer(
 {
     CHECK_CUDA(X); CHECK_CUDA(W1); CHECK_CUDA(bias);
     CHECK_CONTIGUOUS(X); CHECK_CONTIGUOUS(W1); CHECK_CONTIGUOUS(bias);
-    CHECK_FLOAT32(X); CHECK_FLOAT32(W1); CHECK_FLOAT32(bias);
+    TORCH_CHECK(X.scalar_type() == W1.scalar_type() && X.scalar_type() == bias.scalar_type(),
+                "X/W1/bias must have same dtype; got ", X.scalar_type());
 
     TORCH_CHECK(X.dim() == 2 && W1.dim() == 2, "X and W1 must be 2D");
     TORCH_CHECK(bias.dim() == 1, "bias must be 1D");
     TORCH_CHECK(X.size(1) == W1.size(0), "X(", X.size(1), ") != W1 row(", W1.size(0), ")");
     TORCH_CHECK(bias.size(0) == W1.size(1), "bias(", bias.size(0), ") != W1 col(", W1.size(1), ")");
+
+    // fp16/bf16: 组合现有 WMMA matmul + bias_add + gelu（同一 stream 顺序执行）
+    // 显式 :: 限定避免与 at::gelu ADL 重载歧义
+    if (X.scalar_type() == torch::kHalf) {
+        return ::gelu(::bias_add(::matmul_half(X, W1), bias));
+    }
+    if (X.scalar_type() == torch::kBFloat16) {
+        return ::gelu(::bias_add(::matmul_bf16(X, W1), bias));
+    }
 
     int M = X.size(0), K = X.size(1), N = W1.size(1);
     auto H = torch::empty({M, N}, X.options());
