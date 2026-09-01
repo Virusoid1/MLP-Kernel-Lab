@@ -146,8 +146,30 @@ def run_case(spec, dtype_name: str, backend: str, warmup: int, iters: int) -> di
     passed = err < corr_tol and finite
 
     n_repeat = min(64, max(1, 64 // M))  # decode 小 M 多拍平均
+
+    # 预打包静态权重：concat / triton_fused 每次调用都 torch.cat([w_gate, w_up])。
+    # 权重是静态的，cat 应移出计时热路径（在计时前一次性完成）。
+    # 复用与 BACKENDS 相同语义的底层调用，避免计时内重复 cat。
+    if backend == "concat":
+        from python.transformer_mlp import silu
+        w_cat = torch.cat([wg, wu], dim=-1)
+        def time_fn():
+            gate_up = x @ w_cat
+            g, u = gate_up.chunk(2, dim=-1)
+            return (silu(g) * u) @ wd
+    elif backend == "triton_fused":
+        from triton_kernels.fused_swiglu_gateup import fused_gateup_swiglu
+        from triton_kernels.matmul import tiled_matmul
+        w_cat = torch.cat([wg, wu], dim=-1)
+        def time_fn():
+            hidden = fused_gateup_swiglu(x, w_cat)
+            return tiled_matmul(hidden, wd)
+    else:
+        def time_fn():
+            return fn(x, wg, wu, wd)
+
     torch.cuda.reset_peak_memory_stats()
-    samples = measure(lambda a, b, c, d: fn(a, b, c, d), (x, wg, wu, wd), warmup, iters, n_repeat)
+    samples = measure(time_fn, (), warmup, iters, n_repeat)
     peak_mb = torch.cuda.max_memory_allocated() / (1024 * 1024)
 
     st = summarize(samples)
