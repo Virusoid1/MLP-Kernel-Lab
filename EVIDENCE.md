@@ -22,7 +22,8 @@
 | Claim | Evidence Path | Status | Level |
 |---|---|---|---|
 | fp16 跨精度吞吐 | `bench/run.py` all-suite sweep → `artifacts/swiglu_20260901-013853-all-*/swiglu_bench.json` | **跨精度（FP16 vs FP32 eager）max 3.37x / best 3.52x**；**同精度（FP16 vs FP16 eager）median 1.014x、峰值 1.17x（主 shape 仅 +9%）**。跨精度收益来自半精度算力，非 kernel 优于同精度 cuBLAS | E3(数据，非结论) |
-| fp16 六后端性能地图 | `artifacts/swiglu_20260901-010220-prefill-*/swiglu_bench.json`（新 cutile tile） | triton 4.60 < compile 6.42 < triton_fused 7.02 < cutile 16.7 < cuda 29-118 ms（如实记录） | E3 |
+| fp16 六后端性能地图 | `artifacts_3070/swiglu_bench_fp16_bf16.json`（git 冻结 6e8662c，cuda fp16+bf16 全自定义后，2026-09-02） | M512×4096×11008 fp16：triton 4.52 < eager 5.08 ≈ compile 5.07 < concat 5.72 < triton_fused 6.33 < cutile 11.4 < cuda 31.3 ms（如实记录） | E3 |
+| bf16 六后端性能地图（新增） | 同上 JSON（84 rows：fp16+bf16 × 7 后端） | M512×4096×11008 bf16：eager 4.52 ≈ concat 4.39 ≈ compile 4.57 ≈ triton 4.56 < triton_fused 6.14 < cutile 10.8 < cuda 30.5 ms；**正确性 84/84（0 failed）** | E3 |
 | decode 摊销 | 实验报告更新 4 + README | per-token ↓80x（M=1→128）| E3 |
 | cutile tile 优化 | `gpu_utils.py` + tile sweep | cutile matmul 1.5-1.6x（32,64,32 默认）| E3(部分) |
 | fp32 算子级基线 | `results/op_bench_20260901_003415.json` | Triton avg 1.44x / CUDA avg 2.15x（谱系含 0.11x 拖累，已知）| E3(基线) |
