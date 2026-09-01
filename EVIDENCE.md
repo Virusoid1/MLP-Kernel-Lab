@@ -9,7 +9,7 @@
 
 | Claim | Evidence Path | Status | Level |
 |---|---|---|---|
-| 全量测试通过 | `make reproduce`（commit 30187f2, 2026-09-02 冻结）→ `artifacts/20260902-032908-30187f2-*/manifest.json` | **213 tests: 186 passed / 0 failed / 27 skipped**（含 fp16+bf16 SwiGLU-block 训练；+10 = cuda 算子级 fp16+bf16 解锁） | E2 |
+| 全量测试通过 | `make reproduce`（commit 7e09c72, 2026-09-02 冻结）→ `artifacts/20260902-034320-7e09c724-*/manifest.json` | **226 tests: 199 passed / 0 failed / 27 skipped**（含 fp16+bf16 SwiGLU-block 训练、cuda 算子 fp16+bf16 解锁、P1 matmul/layernorm 注册） | E2 |
 | 55 原始算子测试 | `tests/test_{triton,cuda,cutile}_kernels.py` | passed（并入 209 全量） | E2 |
 | SwiGLU block 六后端正确性 | `tests/test_transformer_mlp.py`（DTYPE_SUPPORT 矩阵） | fp16: 六后端闭环（corr 100%）| E2 |
 | 算子级 dtype 矩阵 | `tests/test_dtype_support_matrix.py`（执行式探测） | cuda-fp16 **+bf16** 各 5 行转 PASSED：**30 passed / 18 skipped**（2026-09-02，3070 + 5070 Ti 双架构） | E2→E4 |

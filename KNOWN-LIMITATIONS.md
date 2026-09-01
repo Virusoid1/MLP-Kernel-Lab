@@ -9,7 +9,7 @@
 |---|---|---|
 | ~~CUDA 算子级 fp16（swiglu/softmax 等）~~ | **已解锁（2026-09-02）：binding 增 fp16 分派 + half kernels（swiglu_fused / softmax / relu / gelu / silu，fp16 in→fp32 math→fp16 out）**，3070 sm86 验证 | ~~blocked~~ ✅ 已解锁：dtype matrix cuda-fp16 5 行 PASSED；cuda fp16 block 不再回退 F.silu（norm_l2 5e-4，亲测） |
 | cuda bf16（算子级 vs 块级） | **算子级 bf16 已解锁（2026-09-02）：swiglu_fused/softmax/relu/gelu/silu bf16 变体（fp16 同款 upcast→fp32 math→回落）**；块级 matmul 仍 fp32-only（matmul_half 仅 fp16，bf16 WMMA 未实现） | 算子级短板消除（dtype matrix bf16 5 行 PASSED，3070 + 5070 Ti）；块级 bf16 matmul 保留为显式边界 |
-| torch.library 集成仅覆盖 swiglu | 未推广到 matmul/layernorm | 证明链已完整，推广是工作量扩展 |
+| ~~torch.library 集成仅覆盖 swiglu~~ | **已推广（2026-09-02）：mlp_kernel::matmul + mlp_kernel::layernorm（schema/CPU+CUDA/Meta/autograd + opcheck/gradcheck/compile）**，21 registration tests 全绿 | ~~工作量扩展~~ ✅ 已实现（3070 验证） |
 | 多 GPU / FP8 | 有意不做 | 超出 kernel 项目范围 |
 
 ## 未验证（需其它硬件/权限）

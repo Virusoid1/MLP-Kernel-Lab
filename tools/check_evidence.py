@@ -13,8 +13,8 @@ import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
-EXPECTED_TESTS = 213
-EXPECTED_PASSED = 186  # 2026-09-02 冻结: 30187f2（fp16+bf16 算子解锁后 +10 passed）
+EXPECTED_TESTS = 226
+EXPECTED_PASSED = 199  # 2026-09-02 冻结: 7e09c72（+13 = P1 matmul/layernorm 注册测试）
 MIN_PASSED = 170  # 至少 170 passed（允许未来加测试但不应回落过多）
 
 
