@@ -161,6 +161,7 @@ max_temp / max_power / throttled : <...>
 - cutile 在 Blackwell driver 610 下**可用**（cutile_probe=True），六后端在单设备上全可用。
 - **cuda 后端（mlp_cuda）后续已在本机为 sm120 单独编译**（`TORCH_CUDA_ARCH_LIST=12.0 setup.py build_ext --inplace`，nvcc 13.2）：transformer_mlp -k cuda 15p/2s、原算子 cuda_kernels 16p、P1 8/8；fp16 prefill 三后端（eager/triton/cuda）18 rows 正确性 100%，cuda 后端 fp16 在 Blackwell 仍慢于 cuBLAS（M2048 34.7ms vs eager 6.1ms），如实记录。证据 = artifacts_5070ti/fp16_prefill_cuda_5070ti.json。
 - **fp16 算子解锁（2026-09-02, 双架构验证）**：mlp_cuda 增 swiglu_fused/softmax/relu/gelu/silu 的 fp16 分派（fp16 in→fp32 math→fp16 out）；3070(sm86) 与 5070 Ti(sm120) dtype-matrix cuda-fp16 均为 **5 行 PASSED**；cuda fp16 block 不再回退 F.silu（norm_l2 5e-4）。
+- **Blackwell 全量复现 216/235（0 failed，2026-09-02）**：在 5070 Ti 上 `tools/reproduce.py --skip-build` 全量跑通 —— 与 3070 冻结基线（235t/216p/0f/19s）**完全一致**；期间发现并修复 cuTile layernorm Blackwell bug（tile 512 + N<TILE 零填充垃圾 + 方差污染，commit 1707aed）。manifest = artifacts/20260902-045845-1a9e1c9-NVIDIA_GeForce_RTX_5070_Ti/（fix 已提交 1707aed）。
 
 ## 6. 完成后回报
 
