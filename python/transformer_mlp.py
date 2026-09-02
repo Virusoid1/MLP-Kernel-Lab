@@ -98,7 +98,8 @@ def swiglu_block_cuda(x: torch.Tensor, w_gate: torch.Tensor, w_up: torch.Tensor,
     """
     import mlp_cuda
     if x.dtype == torch.float16:
-        # gate+up 融合（A 一次读, 块级 3->2 次 matmul 数据流, cp.async 管线）
+        # gate+up 融合（A 一次读, cp.async 管线）；swiglu 用独立 fused kernel
+        # （v2.10 实测：swiglu 融合进 pair epilogue 需要双 sC（20KB）占用代价 > 收益，故不融合）
         gate, up = mlp_cuda.matmul_half_pair(x, w_gate, w_up)
         hidden = mlp_cuda.swiglu_fused(gate, up)
         return mlp_cuda.matmul_half(hidden, w_down)

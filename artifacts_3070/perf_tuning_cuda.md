@@ -49,7 +49,17 @@
 
 - 绑定：`matmul_half_pair`/`matmul_bf16_pair`（非对齐 shape 内部回落两次单 matmul）。
 - 正确性：块 cuda 17p、dtype matrix 16p、cuda_kernels 25p 全绿。
-- 目标指标：cuda 块 fp16 vs eager **0.16x → ~0.35x**（累计 2.2x）。
+- 目标指标：cuda 块 fp16 vs eager **0.16x → ~0.29x**（累计 1.8x；协议口径）。
+## v2.10 swiglu 融合进 pair epilogue 实验（2026-09-02 第六迭代, 负结果）
+
+两种实现尝试（输出 hidden = SiLU(gate)*up，免中间 gate/up 与独立 swiglu kernel）：
+
+| 方案 | 结果 | 结论 |
+|---|---|---|
+| 寄存器布局直接算（WMMA fp32-acc m16n16k16 手动映射） | rel_l2 **0.50** 错误 | 手写累加器布局映射易错，弃用 |
+| 双 sC 缓冲（布局无关） | 正确 rel_l2 2.1e-4，但 **20.1ms vs 18.6ms** | sC×2 (20KB smem) 占用代价 > 省掉的 swiglu kernel+中间流量收益 |
+
+**结论：不融合** —— 保持 pair（gate/up 物化）+ 独立 swiglu_fused（v2.9 最优 18.6ms）。pair_swiglu kernel/绑定保留为实验件（正确但未采用）。
 ## v2.8 STAGES 深度管线实验（2026-09-02 第三迭代）
 
 管线内核模板化（STAGES 编译期实例 2/3/4）：

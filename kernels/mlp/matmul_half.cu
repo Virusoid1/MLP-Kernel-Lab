@@ -197,7 +197,98 @@ void matmul_half_pair_pipe_kernel(
 }
 
 
+
+// ---------- gate+up 融合 + swiglu epilogue（输出 hidden = SiLU(gate)*up, A 一次读） ----------
+// 块级只需: 此内核(hidden) + matmul(hidden, wd) —— 免中间 gate/up 物化与独立 swiglu kernel
+template<int STAGES>
+__global__ __launch_bounds__(128)
+void matmul_half_pair_swiglu_kernel(
+    const half* __restrict__ A,
+    const half* __restrict__ B1, const half* __restrict__ B2,
+    half* __restrict__ C,
+    int M, int K, int N)
+{
+    constexpr int TILE = 32, R = 32;
+    __shared__ half sA[STAGES][TILE][R];
+    __shared__ half sB1[STAGES][R][TILE];
+    __shared__ half sB2[STAGES][R][TILE];
+    int warp_row = (threadIdx.x / 64) * 16;
+    int warp_col = ((threadIdx.x / 32) % 2) * 16;
+    int block_row = blockIdx.y * TILE, block_col = blockIdx.x * TILE;
+    const int num_tiles = K / R;
+    const half2* A2 = reinterpret_cast<const half2*>(A);
+    const half2* B1_2 = reinterpret_cast<const half2*>(B1);
+    const half2* B2_2 = reinterpret_cast<const half2*>(B2);
+
+    auto issue = [&](int kt) {
+        int buf = kt & 1, k_start = kt * R;
+        for (int i = threadIdx.x; i < TILE * R / 2; i += blockDim.x) {
+            int h = i * 2, r = h / R, cstart = h % R;
+            __pipeline_memcpy_async(&sA[buf][r][cstart], &A2[(block_row + r) * (K / 2) + (k_start + cstart) / 2], 4);
+        }
+        for (int i = threadIdx.x; i < R * TILE / 2; i += blockDim.x) {
+            int h = i * 2, r = h / TILE, cstart = h % TILE;
+            int off = (k_start + r) * (N / 2) + (block_col + cstart) / 2;
+            __pipeline_memcpy_async(&sB1[buf][r][cstart], &B1_2[off], 4);
+            __pipeline_memcpy_async(&sB2[buf][r][cstart], &B2_2[off], 4);
+        }
+        __pipeline_commit();
+    };
+
+    nvcuda::wmma::fragment<nvcuda::wmma::accumulator, 16, 16, 16, float> acc1, acc2;
+    nvcuda::wmma::fill_fragment(acc1, 0.0f);
+    nvcuda::wmma::fill_fragment(acc2, 0.0f);
+    issue(0);
+    for (int kt = 0; kt < num_tiles; ++kt) {
+        if (kt + STAGES - 1 < num_tiles) issue(kt + STAGES - 1);
+        {
+            int rem = num_tiles - kt - 1;
+            int wait = (rem < STAGES - 1) ? rem : (STAGES - 1);
+            if (wait < 0) wait = 0;
+            __pipeline_wait_prior(wait);
+        }
+        __syncthreads();
+        const int buf = kt & 1;
+        nvcuda::wmma::fragment<nvcuda::wmma::matrix_a, 16, 16, 16, half, nvcuda::wmma::row_major> a0, a1;
+        nvcuda::wmma::fragment<nvcuda::wmma::matrix_b, 16, 16, 16, half, nvcuda::wmma::row_major> b0, b1;
+        nvcuda::wmma::load_matrix_sync(a0, &sA[buf][warp_row][0],  R);
+        nvcuda::wmma::load_matrix_sync(a1, &sA[buf][warp_row][16], R);
+        nvcuda::wmma::load_matrix_sync(b0, &sB1[buf][0][warp_col],  TILE);
+        nvcuda::wmma::load_matrix_sync(b1, &sB1[buf][16][warp_col], TILE);
+        nvcuda::wmma::mma_sync(acc1, a0, b0, acc1);
+        nvcuda::wmma::mma_sync(acc1, a1, b1, acc1);
+        nvcuda::wmma::load_matrix_sync(b0, &sB2[buf][0][warp_col],  TILE);
+        nvcuda::wmma::load_matrix_sync(b1, &sB2[buf][16][warp_col], TILE);
+        nvcuda::wmma::mma_sync(acc2, a0, b0, acc2);
+        nvcuda::wmma::mma_sync(acc2, a1, b1, acc2);
+        __syncthreads();
+    }
+    // swiglu epilogue: hidden = SiLU(gate)*up（双 sC 缓冲，store_matrix_sync 布局无关, 保证正确）
+    __shared__ float sC1[TILE][TILE];
+    __shared__ float sC2[TILE][TILE];
+    nvcuda::wmma::store_matrix_sync(&sC1[warp_row][warp_col], acc1, TILE, nvcuda::wmma::mem_row_major);
+    nvcuda::wmma::store_matrix_sync(&sC2[warp_row][warp_col], acc2, TILE, nvcuda::wmma::mem_row_major);
+    __syncthreads();
+    for (int i = threadIdx.x; i < TILE * TILE; i += blockDim.x) {
+        int r = i / TILE, c = i % TILE;
+        float gg = sC1[r][c];
+        float uu = sC2[r][c];
+        float sig = 1.0f / (1.0f + expf(-gg));
+        C[(block_row + r) * N + block_col + c] = __float2half(gg * sig * uu);
+    }
+}
+
+void launch_matmul_half_pair_swiglu(
+    const half* A, const half* B1, const half* B2, half* C,
+    int M, int K, int N, cudaStream_t stream)
+{
+    dim3 block(128);
+    dim3 grid((N + 31) / 32, (M + 31) / 32);
+    matmul_half_pair_swiglu_kernel<2><<<grid, block, 0, stream>>>(A, B1, B2, C, M, K, N);
+}
+
 void launch_matmul_half_pair(
+
     const half* A, const half* B1, const half* B2,
     half* C1, half* C2, int M, int K, int N, cudaStream_t stream)
 {
