@@ -11,7 +11,7 @@
 ## 关键结论（由本 JSON 直接算出）
 
 - **正确性 100%**：84/84 correctness_passed=true，0 failed（fp16 l2~3-6e-4；bf16 l2~2-5e-3，bf16 尾数更粗符合预期）
-- **M=512×4096×11008 fp16（2026-09-02 最终冻结：cuda cp.async 管线 + pair 融合 + cutile tile64/pair）**：triton 4.63（1.07x）> eager 4.94 ≈ compile 4.93 > concat 5.65 > triton_fused 6.27 > **cutile 6.50（0.76x；旧 11.4/0.55x）** > **cuda 17.4ms（0.28x；旧 31.3/0.16x）**；84 rows 正确性 100%
+- **M=512×4096×11008 fp16（2026-09-02 终冻结：cuda cp.async 16B 管线 + pair 融合 + cutile tile64/pair）**：triton 4.46（1.14x）> eager 5.07 ≈ compile 5.24 > concat 5.70 > triton_fused 6.30 > **cutile 6.60（0.77x；旧 11.4/0.55x）** > **cuda 13.4ms（0.38x；旧 31.3/0.16x）**；84 rows 正确性 100%
 - **M=512×4096×11008 bf16**：eager 4.52 ≈ concat 4.39 ≈ compile 4.57 ≈ triton 4.56（同精度几乎打平）> triton_fused 6.14 > cutile 10.8 > cuda 30.5ms
 - best_speedup（对同 dtype eager）：**3.454**（跨 shape 大 M 场景）
 - cuda/cutile 自定义后端在 3070 上同精度仍慢于 cuBLAS（WMMA/ct.mma tile 不敌），如实记录
