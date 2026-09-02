@@ -49,7 +49,7 @@
 
 - 绑定：`matmul_half_pair`/`matmul_bf16_pair`（非对齐 shape 内部回落两次单 matmul）。
 - 正确性：块 cuda 17p、dtype matrix 16p、cuda_kernels 25p 全绿。
-- 目标指标：cuda 块 fp16 vs eager **0.16x → ~0.45x**（累计 2.8x；16B 向量化后 ad-hoc 口径）。
+- 目标指标：cuda 块 fp16 vs eager **0.16x → ~0.38x**（协议口径，累计 2.4x；ad-hoc 14.5ms 为 0.45x）。
 ## v2.11 L2 grid 轴序实验（2026-09-02 第九迭代, 负结果）
 
 交换 launcher grid 轴序（blockIdx.x=M-tile, 同一 B 列的 M-块连续执行 → B tile L2 复用）：
