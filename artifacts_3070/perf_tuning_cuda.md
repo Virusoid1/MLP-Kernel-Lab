@@ -22,3 +22,18 @@
 
 所有变体通过 tests/test_cuda_kernels.py (25p)、test_transformer_mlp -k cuda (17p)、dtype matrix cuda (16p)。
 
+## v2.7 cp.async 双缓冲管线（2026-09-02 第二迭代）
+
+对齐 shape（M/K/N %32==0）走 cp.async 2-stage 管线内核；非对齐回落同步内核。
+
+| 指标（3070 fp16） | 同步（v2.5 R32） | cp.async 管线 | 提升 |
+|---|---|---|---|
+| matmul 512×4096×11008 单发 | 10.84ms | **6.85ms** | **1.58x** |
+| 块 M512×4096×11008 | 33.3ms | **22.8ms** | **1.46x**（ratio vs eager 6.2x→3.6x） |
+| 块 M2048×4096×11008 | 124.7ms | **85.3ms** | 1.46x |
+| 块 M512×768×3072 | 1.86ms | **1.12ms** | 1.66x |
+
+- 关键修复过程：cp.async 后缺少可见性 __syncthreads（他人写入不可见 → nan）；
+  且不能预取 kt+2（与当前缓冲 (kt&1) 相同 → 覆写）。正确序：issue(kt+1) → wait_prior(1) → syncthreads → mma → syncthreads。
+- 正确性：aligned/ragged fp16 rel_l2 2.1e-4/1.9e-4、bf16 1.7e-3；tests 全绿（块 17p、cuda_kernels 25p）。
+- 待续：STAGES=3 深度管线、gate+up 融合（A 一次读）、向量化 ldmatrix 加载（v2.8）。
