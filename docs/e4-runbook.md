@@ -73,7 +73,7 @@ manifest      : artifacts/<run-id>/manifest.json
 ---- 性能 ----
 fp16 Triton best vs eager-fp32 : <x>   (3070 = 3.52x all-suite)
 fp16 六后端 corr               : <norm_l2 分布>
-cutile / cuda fp16 lat         : <ms>  (3070 = 11.8 / 29-118)
+cutile / cuda fp16 lat         : <ms>  (3070 终冻结 = 6.5 / 13.4；调优前 11.8 / 29-118)
 ---- 热 ----
 max_temp / max_power / throttled : <...>
 ---- 结论 ----

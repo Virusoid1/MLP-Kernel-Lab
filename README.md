@@ -240,8 +240,8 @@ SwiGLU MLP block，CUDA Event 计时（strict FP32 对照固化于 bench/run.py�
 | **triton** | **4.60ms** | **1.09x** | 4.8e-4 |
 | compile | 6.42ms | 0.78x | 4.9e-4 |
 | triton_fused | 7.02ms | 0.71x | 2.9e-4 |
-| cutile | 11.8ms（tile 优化后）| 0.42x | 5.7e-4 |
-| cuda（matmul_half WMMA） | 29-118ms | 0.04-0.17x | 4.8e-4 |
+| cutile | 6.5ms（tile64 + pair 融合, 2026-09-02）| 0.77x | 5.7e-4 |
+| cuda（cp.async 16B 管线 + pair 融合） | 13.4ms（协议) | 0.38x（原 0.16x）| 4.8e-4 |
 
 > **结论（诚实）**：同精度下 Triton 相对 cuBLAS **仅微胜（+9%，全 case median 1.4%、峰值 1.17x）**；
 > cuda/cutile 同精度显著落后。所谓"3.x 倍"是跨精度（FP16 vs FP32）吞吐比，主因是半精度算力，而非 kernel 实现更优。
