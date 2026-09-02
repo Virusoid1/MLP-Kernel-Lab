@@ -74,15 +74,16 @@ void matmul_half_pipe_kernel(
 
     auto issue = [&](int kt) {
         int buf = kt & 1, k_start = kt * R;
-        for (int i = threadIdx.x; i < TILE * R / 2; i += blockDim.x) {
-            int h = i * 2, r = h / R, cstart = h % R;
-            const half2* src = &A2[(block_row + r) * (K / 2) + (k_start + cstart) / 2];
-            __pipeline_memcpy_async(&sA[buf][r][cstart], src, 4);
+        // 16B (8-half) 向量化 cp.async（v2.12）
+        for (int i = threadIdx.x; i < TILE * R / 8; i += blockDim.x) {
+            int h8 = i * 8, r = h8 / R, c8 = h8 % R;
+            const float4* sa = reinterpret_cast<const float4*>(&A2[(block_row + r) * (K / 2) + (k_start + c8) / 2]);
+            __pipeline_memcpy_async(&sA[buf][r][c8], sa, 16);
         }
-        for (int i = threadIdx.x; i < R * TILE / 2; i += blockDim.x) {
-            int h = i * 2, r = h / TILE, cstart = h % TILE;
-            const half2* src = &B2[(k_start + r) * (N / 2) + (block_col + cstart) / 2];
-            __pipeline_memcpy_async(&sB[buf][r][cstart], src, 4);
+        for (int i = threadIdx.x; i < R * TILE / 8; i += blockDim.x) {
+            int h8 = i * 8, r = h8 / TILE, c8 = h8 % TILE;
+            const float4* sb = reinterpret_cast<const float4*>(&B2[(k_start + r) * (N / 2) + (block_col + c8) / 2]);
+            __pipeline_memcpy_async(&sB[buf][r][c8], sb, 16);
         }
         __pipeline_commit();
     };
@@ -139,15 +140,18 @@ void matmul_half_pair_pipe_kernel(
 
     auto issue = [&](int kt) {
         int buf = kt & 1, k_start = kt * R;
-        for (int i = threadIdx.x; i < TILE * R / 2; i += blockDim.x) {
-            int h = i * 2, r = h / R, cstart = h % R;
-            __pipeline_memcpy_async(&sA[buf][r][cstart], &A2[(block_row + r) * (K / 2) + (k_start + cstart) / 2], 4);
+        for (int i = threadIdx.x; i < TILE * R / 8; i += blockDim.x) {
+            int h8 = i * 8, r = h8 / R, c8 = h8 % R;
+            const float4* sa = reinterpret_cast<const float4*>(&A2[(block_row + r) * (K / 2) + (k_start + c8) / 2]);
+            __pipeline_memcpy_async(&sA[buf][r][c8], sa, 16);
         }
-        for (int i = threadIdx.x; i < R * TILE / 2; i += blockDim.x) {
-            int h = i * 2, r = h / TILE, cstart = h % TILE;
-            int off = (k_start + r) * (N / 2) + (block_col + cstart) / 2;
-            __pipeline_memcpy_async(&sB1[buf][r][cstart], &B1_2[off], 4);
-            __pipeline_memcpy_async(&sB2[buf][r][cstart], &B2_2[off], 4);
+        for (int i = threadIdx.x; i < R * TILE / 8; i += blockDim.x) {
+            int h8 = i * 8, r = h8 / TILE, c8 = h8 % TILE;
+            int off = (k_start + r) * (N / 2) + (block_col + c8) / 2;
+            const float4* b1 = reinterpret_cast<const float4*>(&B1_2[off]);
+            const float4* b2 = reinterpret_cast<const float4*>(&B2_2[off]);
+            __pipeline_memcpy_async(&sB1[buf][r][c8], b1, 16);
+            __pipeline_memcpy_async(&sB2[buf][r][c8], b2, 16);
         }
         __pipeline_commit();
     };
@@ -222,15 +226,18 @@ void matmul_half_pair_swiglu_kernel(
 
     auto issue = [&](int kt) {
         int buf = kt & 1, k_start = kt * R;
-        for (int i = threadIdx.x; i < TILE * R / 2; i += blockDim.x) {
-            int h = i * 2, r = h / R, cstart = h % R;
-            __pipeline_memcpy_async(&sA[buf][r][cstart], &A2[(block_row + r) * (K / 2) + (k_start + cstart) / 2], 4);
+        for (int i = threadIdx.x; i < TILE * R / 8; i += blockDim.x) {
+            int h8 = i * 8, r = h8 / R, c8 = h8 % R;
+            const float4* sa = reinterpret_cast<const float4*>(&A2[(block_row + r) * (K / 2) + (k_start + c8) / 2]);
+            __pipeline_memcpy_async(&sA[buf][r][c8], sa, 16);
         }
-        for (int i = threadIdx.x; i < R * TILE / 2; i += blockDim.x) {
-            int h = i * 2, r = h / TILE, cstart = h % TILE;
-            int off = (k_start + r) * (N / 2) + (block_col + cstart) / 2;
-            __pipeline_memcpy_async(&sB1[buf][r][cstart], &B1_2[off], 4);
-            __pipeline_memcpy_async(&sB2[buf][r][cstart], &B2_2[off], 4);
+        for (int i = threadIdx.x; i < R * TILE / 8; i += blockDim.x) {
+            int h8 = i * 8, r = h8 / TILE, c8 = h8 % TILE;
+            int off = (k_start + r) * (N / 2) + (block_col + c8) / 2;
+            const float4* b1 = reinterpret_cast<const float4*>(&B1_2[off]);
+            const float4* b2 = reinterpret_cast<const float4*>(&B2_2[off]);
+            __pipeline_memcpy_async(&sB1[buf][r][c8], b1, 16);
+            __pipeline_memcpy_async(&sB2[buf][r][c8], b2, 16);
         }
         __pipeline_commit();
     };
