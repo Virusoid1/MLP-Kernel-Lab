@@ -49,7 +49,17 @@
 
 - 绑定：`matmul_half_pair`/`matmul_bf16_pair`（非对齐 shape 内部回落两次单 matmul）。
 - 正确性：块 cuda 17p、dtype matrix 16p、cuda_kernels 25p 全绿。
-- 目标指标：cuda 块 fp16 vs eager **0.16x → ~0.29x**（累计 1.8x；协议口径）。
+- 目标指标：cuda 块 fp16 vs eager **0.16x → ~0.28x**（累计 1.75x；协议口径）。
+## v2.11 L2 grid 轴序实验（2026-09-02 第九迭代, 负结果）
+
+交换 launcher grid 轴序（blockIdx.x=M-tile, 同一 B 列的 M-块连续执行 → B tile L2 复用）：
+
+| 测量（fp16 块 med） | 原轴序 | 交换轴序 |
+|---|---|---|
+| M512×4096×11008 | 18.2-18.6ms | 19.0ms |
+| M2048×4096×11008 | 71.6ms | 71.8ms |
+
+**结论：无收益** —— A（4MB≈L2 容量）原轴序已 L2 命中；交换只是把 L2 热对象换成 B，总量相当。回退原轴序。
 ## v2.10 swiglu 融合进 pair epilogue 实验（2026-09-02 第六迭代, 负结果）
 
 两种实现尝试（输出 hidden = SiLU(gate)*up，免中间 gate/up 与独立 swiglu kernel）：
