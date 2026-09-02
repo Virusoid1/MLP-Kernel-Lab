@@ -54,13 +54,14 @@ void matmul_bf16_sync_kernel(
     }
 }
 
-// ---------- cp.async 双缓冲管线内核（对齐 shape） ----------
+// ---------- cp.async 多级管线内核（对齐 shape） ----------
+template<int STAGES>
 __global__ __launch_bounds__(128)
 void matmul_bf16_pipe_kernel(
     const __nv_bfloat16* __restrict__ A, const __nv_bfloat16* __restrict__ B, __nv_bfloat16* __restrict__ C,
     int M, int K, int N)
 {
-    constexpr int TILE = 32, R = 32, STAGES = 2;
+    constexpr int TILE = 32, R = 32;
     __shared__ __nv_bfloat16 sA[STAGES][TILE][R];
     __shared__ __nv_bfloat16 sB[STAGES][R][TILE];
     __shared__ float sC[TILE][TILE];
@@ -90,8 +91,8 @@ void matmul_bf16_pipe_kernel(
     nvcuda::wmma::fill_fragment(acc, 0.0f);
     issue(0);
     for (int kt = 0; kt < num_tiles; ++kt) {
-        if (kt + 1 < num_tiles) issue(kt + 1);   // 预取下一 k-tile（缓冲 (kt+1)&1 ≠ kt&1）
-        __pipeline_wait_prior((kt + 1 < num_tiles) ? 1 : 0);   // 本 k-tile 数据就绪
+        if (kt + STAGES - 1 < num_tiles) issue(kt + STAGES - 1);   // 预取窗口内最远一 tile
+        __pipeline_wait_prior((kt + STAGES - 1 < num_tiles) ? (STAGES - 1) : (num_tiles - kt - 1 < 0 ? 0 : num_tiles - kt - 1));   // 本 k-tile 数据就绪
         __syncthreads();   // 他人 cp.async 写入对本线程可见（关键）
         const int buf = kt & 1;
         nvcuda::wmma::fragment<nvcuda::wmma::matrix_a, 16, 16, 16, __nv_bfloat16, nvcuda::wmma::row_major> a0, a1;
@@ -121,7 +122,12 @@ void launch_matmul_bf16(
     if (aligned) {
         dim3 block(128);
         dim3 grid((N + 31) / 32, (M + 31) / 32);
-        matmul_bf16_pipe_kernel<<<grid, block, 0, stream>>>(A, B, C, M, K, N);
+        const int stages = 2;  // 实测 2/3/4: 2 最优（3/4 占用损失抵消）；见 perf_tuning_cuda.md v2.8
+        switch (stages) {
+            case 3: matmul_bf16_pipe_kernel<3><<<grid, block, 0, stream>>>(A, B, C, M, K, N); break;
+            case 4: matmul_bf16_pipe_kernel<4><<<grid, block, 0, stream>>>(A, B, C, M, K, N); break;
+            default: matmul_bf16_pipe_kernel<2><<<grid, block, 0, stream>>>(A, B, C, M, K, N);
+        }
     } else {
         dim3 block(128);
         dim3 grid((N + 31) / 32, (M + 31) / 32);

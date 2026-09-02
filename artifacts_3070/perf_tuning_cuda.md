@@ -37,3 +37,13 @@
   且不能预取 kt+2（与当前缓冲 (kt&1) 相同 → 覆写）。正确序：issue(kt+1) → wait_prior(1) → syncthreads → mma → syncthreads。
 - 正确性：aligned/ragged fp16 rel_l2 2.1e-4/1.9e-4、bf16 1.7e-3；tests 全绿（块 17p、cuda_kernels 25p）。
 - 待续：STAGES=3 深度管线、gate+up 融合（A 一次读）、向量化 ldmatrix 加载（v2.8）。
+## v2.8 STAGES 深度管线实验（2026-09-02 第三迭代）
+
+管线内核模板化（STAGES 编译期实例 2/3/4）：
+
+| STAGES | 块 med (M512×4096×11008 fp16) | vs eager |
+|---|---|---|
+| 2 | 24.4ms | 3.7x |
+| 3 | 24.1ms | 3.7x |
+
+**结论：2-stage 最优** —— 更深管线（smem 16KB+）占用损失抵消延迟隐藏收益。保持 STAGES=2。下一优化点：**gate+up 融合 matmul（A 一次读，块级 3→2 次 matmul 数据流）**。
