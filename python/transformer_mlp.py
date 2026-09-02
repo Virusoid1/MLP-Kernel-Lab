@@ -120,12 +120,13 @@ def swiglu_block_cutile(x: torch.Tensor, w_gate: torch.Tensor, w_up: torch.Tenso
     注：仓库 cutile swiglu_cutile 只是单参数 silu(x)；SwiGLU 双参数 (gate, up) 语义
     在此用 Python 层 silu(gate)*up 表达（gate/up 均已来自 cuTile matmul）。
     """
-    from cutile_kernels.matmul import cutile_matmul
+    from cutile_kernels.matmul import cutile_matmul, cutile_matmul_pair
     from cutile_kernels.swiglu_cutile import swiglu_cutile
     in_dtype = x.dtype
-    # cutile_matmul 恒输出 fp32：中间量转回输入 dtype，保证下游 ct.mma 输入同名
-    gate = cutile_matmul(x, w_gate).to(in_dtype)
-    up = cutile_matmul(x, w_up).to(in_dtype)
+    # gate+up 共享 A 融合（v2.5 优化, 镜像 cuda pair）；输出 fp32 转回输入 dtype
+    gate, up = cutile_matmul_pair(x, w_gate, w_up)
+    gate = gate.to(in_dtype)
+    up = up.to(in_dtype)
     hidden = swiglu_cutile(gate) * up
     return cutile_matmul(hidden, w_down).to(in_dtype)
 

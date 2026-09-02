@@ -28,4 +28,15 @@
 - **采用 (64,64,32)**：主形状（prefill 512/2048 × 4096 × 11008）内核侧提升 1.3-1.9x；小 K 形状 (768×3072) 最优仍为 (32,128,32)（0.59ms vs 0.86）—— 由于单 arch tile 约束，取主形状最优。
 - 正确性：dtype matrix cutile 4p（matmul+swiglu×fp16/bf16）、transformer cutile 17p、cutile_kernels 18p 全绿。
 - Blackwell（16,16,16）性能 62.7ms（0.02x）为已知负结果；**下步（SSH 恢复后）在 5070 Ti 上对 Blackwell 做同样 sweep**（候选含 (64,64,32)/(32,128,32)/(16,16,16)）。
+## v2 cutile gate+up 共享-A 融合（2026-09-02 第七迭代）
+
+`cutile_matmul_pair`：镜像 cuda pair —— A 一次读、双 B/双 acc（fp32 输出同 cutile_matmul 约定），块级 3→2 次 matmul launch。
+
+| shape | 分离（tile64） | pair | |
+|---|---|---|---|
+| M512×4096×11008 | 9.34ms（ad-hoc） | 9.04ms | ≈（噪声带内）|
+| M2048×4096×11008 | 35.9ms | **29.9ms** | 1.20x |
+| M512×768×3072 | 0.73-0.86ms | **0.66ms** | ~1.15x |
+
+正确性：rel_l2 5.2e-4；transformer cutile 17p、cutile_kernels 18p 全绿。保留（少 launch + A 流量减半，主 shape 持平）。
 
