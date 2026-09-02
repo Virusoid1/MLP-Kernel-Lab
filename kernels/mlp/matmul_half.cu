@@ -1,6 +1,9 @@
-// matmul_half: fp16 输入直通 WMMA TensorCore（fp32 累加，half 输出）
+// matmul_half: fp16 WMMA TensorCore（fp32 累加，half 输出）
 // 语义 = fp16 TensorCore 标准路径（fp16 in → fp32 acc → fp16 out）。
-// 由 binding.matmul_half 暴露，用于 cuda fp16 block（v2 四后端 fp16 补全）。
+// perf 调优 v2.6 结论（3070 实测对比见 artifacts_3070/perf_tuning_cuda.md）：
+//   R16 基线 33.3ms; R32 dual-MMA 32.3ms（同步减半无显著收益）;
+//   BM128/BN32 42.7ms（sC 24KB 占用塌陷）; T64 直接-store 不可行（store_matrix_sync 要求元素类型匹配）。
+// 保留形态：32x32 tile + R32 dual-MMA + fp32 sC staging（正确且与基线同档）。
 
 #include <cuda_fp16.h>
 #include <mma.h>
@@ -12,17 +15,14 @@ void matmul_half_kernel(
     int M, int K, int N)
 {
     constexpr int TILE = 32;
-    constexpr int R = 16;
+    constexpr int R = 32;
     __shared__ half sA[TILE][R];
     __shared__ half sB[R][TILE];
     __shared__ float sC[TILE][TILE];
 
     int warp_id = threadIdx.x / 32;
-    int warp_m = warp_id / (TILE / 16);
-    int warp_n = warp_id % (TILE / 16);
-    int warp_row = warp_m * 16;
-    int warp_col = warp_n * 16;
-
+    int warp_row = (warp_id / 2) * 16;   // 2x2 warp 排布
+    int warp_col = (warp_id % 2) * 16;
     int block_row = blockIdx.y * TILE;
     int block_col = blockIdx.x * TILE;
 
@@ -43,11 +43,14 @@ void matmul_half_kernel(
         }
         __syncthreads();
 
-        nvcuda::wmma::fragment<nvcuda::wmma::matrix_a, 16, 16, 16, half, nvcuda::wmma::row_major> a_frag;
-        nvcuda::wmma::fragment<nvcuda::wmma::matrix_b, 16, 16, 16, half, nvcuda::wmma::row_major> b_frag;
-        nvcuda::wmma::load_matrix_sync(a_frag, &sA[warp_row][0], R);
-        nvcuda::wmma::load_matrix_sync(b_frag, &sB[0][warp_col], TILE);
-        nvcuda::wmma::mma_sync(acc, a_frag, b_frag, acc);
+        nvcuda::wmma::fragment<nvcuda::wmma::matrix_a, 16, 16, 16, half, nvcuda::wmma::row_major> a0, a1;
+        nvcuda::wmma::fragment<nvcuda::wmma::matrix_b, 16, 16, 16, half, nvcuda::wmma::row_major> b0, b1;
+        nvcuda::wmma::load_matrix_sync(a0, &sA[warp_row][0],  R);
+        nvcuda::wmma::load_matrix_sync(a1, &sA[warp_row][16], R);
+        nvcuda::wmma::load_matrix_sync(b0, &sB[0][warp_col],  TILE);
+        nvcuda::wmma::load_matrix_sync(b1, &sB[16][warp_col], TILE);
+        nvcuda::wmma::mma_sync(acc, a0, b0, acc);
+        nvcuda::wmma::mma_sync(acc, a1, b1, acc);
         __syncthreads();
     }
 
