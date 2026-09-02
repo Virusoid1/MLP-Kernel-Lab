@@ -98,17 +98,14 @@ def swiglu_block_cuda(x: torch.Tensor, w_gate: torch.Tensor, w_up: torch.Tensor,
     """
     import mlp_cuda
     if x.dtype == torch.float16:
-        mm = mlp_cuda.matmul_half
-        gate = mm(x, w_gate)
-        up = mm(x, w_up)
+        # gate+up 融合（A 一次读, 块级 3->2 次 matmul 数据流, cp.async 管线）
+        gate, up = mlp_cuda.matmul_half_pair(x, w_gate, w_up)
         hidden = mlp_cuda.swiglu_fused(gate, up)
-        return mm(hidden, w_down)
+        return mlp_cuda.matmul_half(hidden, w_down)
     if x.dtype == torch.bfloat16:
-        mm = mlp_cuda.matmul_bf16
-        gate = mm(x, w_gate)
-        up = mm(x, w_up)
+        gate, up = mlp_cuda.matmul_bf16_pair(x, w_gate, w_up)
         hidden = mlp_cuda.swiglu_fused(gate, up)
-        return mm(hidden, w_down)
+        return mlp_cuda.matmul_bf16(hidden, w_down)
     gate = mlp_cuda.matmul_tiled_auto(x, w_gate)
     up = mlp_cuda.matmul_tiled_auto(x, w_up)
     hidden = mlp_cuda.swiglu_fused(gate, up)

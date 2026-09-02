@@ -36,7 +36,20 @@
 - 关键修复过程：cp.async 后缺少可见性 __syncthreads（他人写入不可见 → nan）；
   且不能预取 kt+2（与当前缓冲 (kt&1) 相同 → 覆写）。正确序：issue(kt+1) → wait_prior(1) → syncthreads → mma → syncthreads。
 - 正确性：aligned/ragged fp16 rel_l2 2.1e-4/1.9e-4、bf16 1.7e-3；tests 全绿（块 17p、cuda_kernels 25p）。
-- 待续：STAGES=3 深度管线、gate+up 融合（A 一次读）、向量化 ldmatrix 加载（v2.8）。
+- 待续：gate+up 融合（A 一次读）、向量化 ldmatrix 加载（v2.8）。
+## v2.9 gate+up 融合 matmul（2026-09-02 第四迭代）
+
+块 fp16 的 gate=X@Wg 与 up=X@Wu 共享 A=X：融合为单内核（A 一次读、双 B/双 acc、共享 sC 顺序 epilogue），块级 3→2 次 matmul 数据流。
+
+| 指标（fp16） | 分离（v2.7 管线） | 融合 pair | 再提升 | 相对原始基线 |
+|---|---|---|---|---|
+| 块 M512×4096×11008 | 22.8ms | **18.6ms**（ratio 3.6x→2.8x） | 1.22x | **33.3→18.6 = 1.79x** |
+| 块 M2048×4096×11008 | 85.3ms | **71.6ms** | 1.19x | 124.7→71.6 = 1.74x |
+| 块 M512×768×3072 | 1.12ms | **0.95ms** | 1.18x | 1.86→0.95 |
+
+- 绑定：`matmul_half_pair`/`matmul_bf16_pair`（非对齐 shape 内部回落两次单 matmul）。
+- 正确性：块 cuda 17p、dtype matrix 16p、cuda_kernels 25p 全绿。
+- 目标指标：cuda 块 fp16 vs eager **0.16x → ~0.35x**（累计 2.2x）。
 ## v2.8 STAGES 深度管线实验（2026-09-02 第三迭代）
 
 管线内核模板化（STAGES 编译期实例 2/3/4）：

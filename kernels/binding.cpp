@@ -96,6 +96,14 @@ void launch_matmul_bf16(
     const __nv_bfloat16* A, const __nv_bfloat16* B, __nv_bfloat16* C,
     int M, int K, int N, cudaStream_t stream);
 
+// gate+up 融合（A 一次读）: 定义在 matmul_half.cu / matmul_bf16.cu
+void launch_matmul_half_pair(
+    const half* A, const half* B1, const half* B2,
+    half* C1, half* C2, int M, int K, int N, cudaStream_t stream);
+void launch_matmul_bf16_pair(
+    const __nv_bfloat16* A, const __nv_bfloat16* B1, const __nv_bfloat16* B2,
+    __nv_bfloat16* C1, __nv_bfloat16* C2, int M, int K, int N, cudaStream_t stream);
+
 void launch_gelu_backward_vec4(
     const float* grad_output, const float* input, float* grad_input,
     int n, cudaStream_t stream);
@@ -290,6 +298,76 @@ torch::Tensor matmul_bf16(torch::Tensor A, torch::Tensor B) {
         reinterpret_cast<__nv_bfloat16*>(C.data_ptr<at::BFloat16>()),
         M, K, N, _get_cuda_stream(A));
     return C;
+}
+
+// matmul_half_pair: gate=X@Wg 与 up=X@Wu 融合（A 一次读, 双 B/双 acc）
+std::tuple<torch::Tensor, torch::Tensor> matmul_half_pair(
+    torch::Tensor A, torch::Tensor B1, torch::Tensor B2)
+{
+    CHECK_CUDA(A); CHECK_CUDA(B1); CHECK_CUDA(B2);
+    CHECK_CONTIGUOUS(A); CHECK_CONTIGUOUS(B1); CHECK_CONTIGUOUS(B2);
+    TORCH_CHECK(A.scalar_type() == torch::kHalf &&
+                B1.scalar_type() == torch::kHalf && B2.scalar_type() == torch::kHalf,
+                "matmul_half_pair requires fp16 inputs");
+
+    int M = A.size(0), K = A.size(1), N = B1.size(1);
+    TORCH_CHECK(A.size(1) == B1.size(0) && A.size(1) == B2.size(0), "K mismatch");
+    TORCH_CHECK(B1.size(1) == B2.size(1), "N mismatch");
+
+    auto C1 = torch::empty({M, N}, A.options());
+    auto C2 = torch::empty({M, N}, A.options());
+    const bool aligned = (M % 32 == 0) && (K % 32 == 0) && (N % 32 == 0) && (K >= 32);
+    if (aligned) {
+        dim3 block(128);
+        dim3 grid((N + 31) / 32, (M + 31) / 32);
+        launch_matmul_half_pair(
+            reinterpret_cast<const half*>(A.data_ptr<at::Half>()),
+            reinterpret_cast<const half*>(B1.data_ptr<at::Half>()),
+            reinterpret_cast<const half*>(B2.data_ptr<at::Half>()),
+            reinterpret_cast<half*>(C1.data_ptr<at::Half>()),
+            reinterpret_cast<half*>(C2.data_ptr<at::Half>()),
+            M, K, N, _get_cuda_stream(A));
+    } else {
+        auto g = ::matmul_half(A, B1);
+        auto u = ::matmul_half(A, B2);
+        C1.copy_(g); C2.copy_(u);
+    }
+    return std::make_tuple(C1, C2);
+}
+
+// matmul_bf16_pair: gate=X@Wg 与 up=X@Wu 融合（A 一次读, 双 B/双 acc）
+std::tuple<torch::Tensor, torch::Tensor> matmul_bf16_pair(
+    torch::Tensor A, torch::Tensor B1, torch::Tensor B2)
+{
+    CHECK_CUDA(A); CHECK_CUDA(B1); CHECK_CUDA(B2);
+    CHECK_CONTIGUOUS(A); CHECK_CONTIGUOUS(B1); CHECK_CONTIGUOUS(B2);
+    TORCH_CHECK(A.scalar_type() == torch::kBFloat16 &&
+                B1.scalar_type() == torch::kBFloat16 && B2.scalar_type() == torch::kBFloat16,
+                "matmul_bf16_pair requires bf16 inputs");
+
+    int M = A.size(0), K = A.size(1), N = B1.size(1);
+    TORCH_CHECK(A.size(1) == B1.size(0) && A.size(1) == B2.size(0), "K mismatch");
+    TORCH_CHECK(B1.size(1) == B2.size(1), "N mismatch");
+
+    auto C1 = torch::empty({M, N}, A.options());
+    auto C2 = torch::empty({M, N}, A.options());
+    const bool aligned = (M % 32 == 0) && (K % 32 == 0) && (N % 32 == 0) && (K >= 32);
+    if (aligned) {
+        dim3 block(128);
+        dim3 grid((N + 31) / 32, (M + 31) / 32);
+        launch_matmul_bf16_pair(
+            reinterpret_cast<const __nv_bfloat16*>(A.data_ptr<at::BFloat16>()),
+            reinterpret_cast<const __nv_bfloat16*>(B1.data_ptr<at::BFloat16>()),
+            reinterpret_cast<const __nv_bfloat16*>(B2.data_ptr<at::BFloat16>()),
+            reinterpret_cast<__nv_bfloat16*>(C1.data_ptr<at::BFloat16>()),
+            reinterpret_cast<__nv_bfloat16*>(C2.data_ptr<at::BFloat16>()),
+            M, K, N, _get_cuda_stream(A));
+    } else {
+        auto g = matmul_bf16(A, B1);
+        auto u = matmul_bf16(A, B2);
+        C1.copy_(g); C2.copy_(u);
+    }
+    return std::make_tuple(C1, C2);
 }
 
 // ============================================================
@@ -876,6 +954,8 @@ PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {
           py::arg("A"), py::arg("B"),
           py::arg("BLOCK_M") = 16, py::arg("BLOCK_N") = 16, py::arg("BLOCK_K") = 16);
     m.def("matmul_half", &matmul_half, "fp16 TensorCore matmul (fp16 in -> fp32 acc -> fp16 out)");
+    m.def("matmul_half_pair", &matmul_half_pair, "fused gate+up: (A@B1, A@B2) shared-A fp16");
+    m.def("matmul_bf16_pair", &matmul_bf16_pair, "fused gate+up: (A@B1, A@B2) shared-A bf16");
     m.def("matmul_bf16", &matmul_bf16, "bf16 TensorCore matmul (bf16 in -> fp32 acc -> bf16 out)");
     m.def("matmul_tiled_auto", &matmul_tiled_auto,
           "Auto-tiled CUDA matmul C = A @ B (adaptive block sizes)");
