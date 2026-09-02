@@ -83,7 +83,7 @@ def get_arch_params() -> dict:
             "max_block_m": 128, "max_block_n": 128, "max_block_k": 64,
             "max_stages": 4, "max_warps": 8,
             "elementwise_block": 4096,
-            "cutile_matmul_tile": (32, 64, 32),  # 3070 实测 (32,64,32) 比 (32,32,32) 快 1.5-1.6x (tile sweep 2026-09)
+            "cutile_matmul_tile": (64, 64, 32),  # 3070 tile sweep 2026-09-02: (64,64,32) M512x4096x11008 13.97->7.39ms (1.89x), M2048 1.19x; (32,128,32) 小 K 更优但主 shape 差 -> 详见 artifacts_3070/perf_tuning_cutile.md
             "cutile_elementwise_tile": 512,
             "cutile_layernorm_tile": 256,
         }
